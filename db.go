@@ -127,6 +127,9 @@ type DB struct {
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
+
+	//TSet related
+	reduceFunc table.ReduceFunc
 }
 
 const (
@@ -1147,7 +1150,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 					return
 				}
 				sl := more.mt.sl
-				itrs = append(itrs, sl.NewUniIterator(false))
+				itrs = append(itrs, getIterator(db, sl.NewUniIterator(false)))
 				mts = append(mts, more.mt)
 				cbs = append(cbs, more.cb)
 
@@ -1169,7 +1172,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 		sz = ft.mt.sl.MemSize()
 		// Reset of itrs, mts etc. is being done below.
 		y.AssertTrue(len(itrs) == 0 && len(mts) == 0 && len(cbs) == 0)
-		itrs = append(itrs, ft.mt.sl.NewUniIterator(false))
+		itrs = append(itrs, getIterator(db, ft.mt.sl.NewUniIterator(false)))
 		mts = append(mts, ft.mt)
 		cbs = append(cbs, ft.cb)
 
@@ -1213,6 +1216,13 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 		itrs, mts, cbs, sz = itrs[:0], mts[:0], cbs[:0], 0
 	}
 	return nil
+}
+
+func getIterator(db *DB, iterator *skl.UniIterator) y.Iterator {
+	if db.reduceFunc == nil {
+		return iterator
+	}
+	return table.NewReducedUniIterator(iterator, db.reduceFunc)
 }
 
 func exists(path string) (bool, error) {

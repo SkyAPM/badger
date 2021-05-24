@@ -38,13 +38,13 @@ function InstallJemalloc() {
 
 tags="-tags=jemalloc"
 
+InstallJemalloc
 # Ensure that we can compile the binary.
 pushd badger
 go build -v $tags .
 popd
 
 # tags=""
-InstallJemalloc
 
 # Run the memory intensive tests first.
 manual() {
@@ -98,11 +98,11 @@ root() {
 stream() {
   set -eo pipefail
   pushd badger
-  baseDir=$(mktemp -d -p .)
+  baseDir=$(mktemp -d -t .)
   ./badger benchmark write -s --dir=$baseDir/test | tee $baseDir/log.txt
-  ./badger benchmark read --dir=$baseDir/test --full-scan | tee --append $baseDir/log.txt
-  ./badger benchmark read --dir=$baseDir/test -d=30s | tee --append $baseDir/log.txt
-  ./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee --append $baseDir/log.txt
+  ./badger benchmark read --dir=$baseDir/test --full-scan | tee -a $baseDir/log.txt
+  ./badger benchmark read --dir=$baseDir/test -d=30s | tee -a $baseDir/log.txt
+  ./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee -a $baseDir/log.txt
   count=$(cat "$baseDir/log.txt" | grep "at program end: 0 B" | wc -l)
   rm -rf $baseDir
   if [ $count -ne 4 ]; then
