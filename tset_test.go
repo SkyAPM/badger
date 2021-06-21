@@ -1,17 +1,12 @@
 package badger
 
 import (
-	"bytes"
-	"fmt"
 	"io/ioutil"
 	"reflect"
 	"testing"
 
-	"github.com/dgraph-io/badger/v3/y"
 	"github.com/stretchr/testify/require"
 )
-
-var errVal = []byte{121}
 
 type arg struct {
 	key []byte
@@ -51,48 +46,12 @@ func TestNewTSet(t *testing.T) {
 			},
 			wantPutErr: true,
 		},
-		{
-			name: "invalid value",
-			args: []arg{
-				{[]byte("k1"), 1, errVal},
-			},
-			wantVLGetErr: true,
-		},
-	}
-	reduceFunc := func(left bytes.Buffer, right y.ValueStruct) bytes.Buffer {
-		if right.Value == nil {
-			return left
-		}
-		left.Write(right.Value[:1])
-		return left
-	}
-	extractFunc := func(raw []byte, ts uint64) ([]byte, error) {
-		if raw == nil || len(raw) < 1 {
-			return nil, fmt.Errorf("can not find data")
-		}
-		if bytes.Equal(raw, errVal) {
-			return nil, fmt.Errorf("invalid value")
-		}
-		return []byte{raw[len(raw)-int(ts)]}, nil
-	}
-	splitFunc := func(raw []byte) ([][]byte, error) {
-		if raw == nil || len(raw) < 1 {
-			return nil, fmt.Errorf("can not find data")
-		}
-		if bytes.Equal(raw, errVal) {
-			return nil, fmt.Errorf("invalid value")
-		}
-		bb := make([][]byte, len(raw))
-		for i := range raw {
-			bb[i] = []byte{raw[i]}
-		}
-		return bb, nil
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var dir string
 			runTSetTest(t, "", func(t *testing.T, db *DB) {
-				s := NewTSet(db, reduceFunc, extractFunc, splitFunc)
+				s := NewTSet(db, 3)
 				dir = db.opt.Dir
 
 				for _, arg := range tt.args {
@@ -106,7 +65,7 @@ func TestNewTSet(t *testing.T) {
 			})
 			defer removeDir(dir)
 			runTSetTest(t, dir, func(t *testing.T, db *DB) {
-				verifyGet(t, tt, NewTSet(db, reduceFunc, extractFunc, splitFunc), tt.wantVLGetErr)
+				verifyGet(t, tt, NewTSet(db, 3), tt.wantVLGetErr)
 			})
 		})
 	}

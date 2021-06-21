@@ -129,7 +129,8 @@ type DB struct {
 	allocPool  *z.AllocatorPool
 
 	//TSet related
-	reduceFunc table.ReduceFunc
+	compressValue bool
+	compressLevel int
 }
 
 const (
@@ -1219,10 +1220,10 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 }
 
 func getIterator(db *DB, iterator *skl.UniIterator) y.Iterator {
-	if db.reduceFunc == nil {
+	if !db.compressValue {
 		return iterator
 	}
-	return table.NewReducedUniIterator(iterator, db.reduceFunc)
+	return table.NewReducedUniIterator(iterator, db.compressLevel)
 }
 
 func exists(path string) (bool, error) {

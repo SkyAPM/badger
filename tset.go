@@ -12,27 +12,20 @@ import (
 
 var ErrTSetInvalidTS = errors.New("Timestamp should be greater than 0")
 
-type ExtractFunc func(raw []byte, ts uint64) ([]byte, error)
-
-type SplitFunc func(raw []byte) ([][]byte, error)
-
 // TSet is a time-series set, which leverages internal version to store the timestamp. The effect-side is there's no
 // chance to append a 8-bit value to the key as the version.
 // Once MemTables are flushed, the table.ReduceFunc is invoked to reduce/merge values which have identical keys. In contrast,
 // the ExtractFunc helps Get method to extract reduced values from the "vault" created by table.ReduceFunc.
 // TSet also provide GetAll which needs a SplitFunc to retrieve all values in the same key.
 type TSet struct {
-	db          *DB
-	extractFunc ExtractFunc
-	splitFunc   SplitFunc
+	db *DB
 }
 
-func NewTSet(db *DB, reduceFunc table.ReduceFunc, extractFunc ExtractFunc, splitFunc SplitFunc) *TSet {
-	db.reduceFunc = reduceFunc
+func NewTSet(db *DB, compressLevel int) *TSet {
+	db.compressValue = true
+	db.compressLevel = compressLevel
 	return &TSet{
-		db:          db,
-		extractFunc: extractFunc,
-		splitFunc:   splitFunc,
+		db: db,
 	}
 }
 
@@ -99,7 +92,11 @@ func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 	if errLC != nil {
 		return nil, fmt.Errorf("faliled to get val from leved files: %v", errLC)
 	}
-	return s.extractFunc(vs.Value, ts)
+	var rVal *table.ReducedValue
+	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
+		return nil, err
+	}
+	return rVal.Get(ts)
 }
 
 func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
@@ -115,7 +112,26 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 	if errLC != nil {
 		return nil, fmt.Errorf("faliled to get val from leved files: %v", errLC)
 	}
-	return s.splitFunc(vs.Value)
+	var rVal *table.ReducedValue
+	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
+		return nil, err
+	}
+	iter := rVal.Iter(false)
+	val = make([][]byte, 0, rVal.Len())
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		val = append(val, iter.Value().Value)
+	}
+	return val, nil
+}
+
+func (s *TSet) unmarshalValue(val []byte) (*table.ReducedValue, error) {
+	rVal := &table.ReducedValue{
+		CompressLevel: s.db.compressLevel,
+	}
+	if err := rVal.Unmarshal(val); err != nil {
+		return nil, fmt.Errorf("failed unmarshal value: %w", err)
+	}
+	return rVal, nil
 }
 
 func (s *TSet) seekMemTables(prefix []byte) [][]byte {
