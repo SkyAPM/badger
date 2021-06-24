@@ -131,6 +131,7 @@ type DB struct {
 	//TSet related
 	compressValue bool
 	compressLevel int
+	valueSize     int
 }
 
 const (
@@ -1223,7 +1224,7 @@ func getIterator(db *DB, iterator *skl.UniIterator) y.Iterator {
 	if !db.compressValue {
 		return iterator
 	}
-	return table.NewReducedUniIterator(iterator, db.compressLevel)
+	return table.NewReducedUniIterator(iterator, db.compressLevel, db.valueSize, table.WithMetricEnable(db.opt.MetricsEnabled))
 }
 
 func exists(path string) (bool, error) {

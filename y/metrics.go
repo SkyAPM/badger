@@ -52,6 +52,14 @@ var (
 	numMemtableGets *expvar.Int
 	// numCompactionTables is the number of tables being compacted
 	numCompactionTables *expvar.Int
+	// numTSetFanOut is the number of the fanout for memtable to L0
+	numTSetFanOut *expvar.Int
+	// numTSetFanOutSize is the bytes of the fanout for memtable to L0
+	numTSetFanOutSize *expvar.Int
+	// numTSetFanOutEntities is the number of entities in the fanout
+	numTSetFanOutEntities *expvar.Int
+	// numTSetFanOutCompressedSize is the compressed size of the fanout value
+	numTSetFanOutCompressedSize *expvar.Int
 )
 
 // These variables are global and have cumulative values for all kv stores.
@@ -70,6 +78,10 @@ func init() {
 	vlogSize = expvar.NewMap("badger_v3_vlog_size_bytes")
 	pendingWrites = expvar.NewMap("badger_v3_pending_writes_total")
 	numCompactionTables = expvar.NewInt("badger_v3_compactions_current")
+	numTSetFanOut = expvar.NewInt("banyandb_fanout_total")
+	numTSetFanOutSize = expvar.NewInt("banyandb_fanout_bytes")
+	numTSetFanOutEntities = expvar.NewInt("banyandb_fanout_entities")
+	numTSetFanOutCompressedSize = expvar.NewInt("banyandb_fanout_compressed_bytes")
 }
 
 func NumReadsAdd(enabled bool, val int64) {
@@ -134,6 +146,22 @@ func LSMSizeGet(enabled bool, key string) expvar.Var {
 
 func VlogSizeGet(enabled bool, key string) expvar.Var {
 	return getFromMap(enabled, vlogSize, key)
+}
+
+func NumTSetFanOut(enabled bool, val int64) {
+	addInt(enabled, numTSetFanOut, val)
+}
+
+func NumTSetFanOutSize(enabled bool, val int64) {
+	addInt(enabled, numTSetFanOutSize, val)
+}
+
+func NumTSetFanOutEntities(enabled bool, val int64) {
+	addInt(enabled, numTSetFanOutEntities, val)
+}
+
+func NumTSetFanOutCompressedSize(enabled bool, val int64) {
+	addInt(enabled, numTSetFanOutCompressedSize, val)
 }
 
 func addInt(enabled bool, metric *expvar.Int, val int64) {

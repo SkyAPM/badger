@@ -21,9 +21,11 @@ type TSet struct {
 	db *DB
 }
 
-func NewTSet(db *DB, compressLevel int) *TSet {
+func NewTSet(db *DB, compressLevel, valueSize int) *TSet {
 	db.compressValue = true
 	db.compressLevel = compressLevel
+	db.valueSize = valueSize
+	db.opt.NumVersionsToKeep = math.MaxInt64
 	return &TSet{
 		db: db,
 	}
@@ -88,9 +90,12 @@ func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 			return vs.Value, nil
 		}
 	}
-	vs, errLC := s.db.lc.get(y.KeyWithTs(key, math.MaxUint64), y.ValueStruct{}, 0)
+	vs, errLC := s.db.lc.get(y.KeyWithTs(key, ts), y.ValueStruct{}, 0)
 	if errLC != nil {
 		return nil, fmt.Errorf("faliled to get val from leved files: %v", errLC)
+	}
+	if vs.Value == nil {
+		return nil, nil
 	}
 	var rVal *table.ReducedValue
 	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
@@ -112,6 +117,9 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 	if errLC != nil {
 		return nil, fmt.Errorf("faliled to get val from leved files: %v", errLC)
 	}
+	if vs.Value == nil {
+		return nil, nil
+	}
 	var rVal *table.ReducedValue
 	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
 		return nil, err
@@ -125,9 +133,7 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 }
 
 func (s *TSet) unmarshalValue(val []byte) (*table.ReducedValue, error) {
-	rVal := &table.ReducedValue{
-		CompressLevel: s.db.compressLevel,
-	}
+	rVal := table.NewReducedValue(s.db.compressLevel, s.db.valueSize)
 	if err := rVal.Unmarshal(val); err != nil {
 		return nil, fmt.Errorf("failed unmarshal value: %w", err)
 	}

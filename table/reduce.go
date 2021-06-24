@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/dgraph-io/badger/v3/y"
@@ -27,7 +28,8 @@ type ReducedUniIterator struct {
 	k             []byte
 	v             y.ValueStruct
 	compressLevel int
-	compressSize  int
+	valueSize     int
+	metricEnable  bool
 }
 
 func (r *ReducedUniIterator) Rewind() {
@@ -66,31 +68,47 @@ func (r *ReducedUniIterator) reduce() {
 	if !r.delegated.Valid() {
 		return
 	}
-	reducedValue := ReducedValue{
-		CompressLevel: r.compressLevel,
-	}
-	maxVersion := y.ParseTs(r.delegated.Key())
+	reducedValue := NewReducedValue(r.compressLevel, r.valueSize)
+	reducedValue.metricEnable = r.metricEnable
+	minVersion := y.ParseTs(r.delegated.Key())
 	k := y.ParseKey(r.delegated.Key())
 	for r.k = r.delegated.Key(); r.delegated.Valid() && y.SameKey(r.k, r.delegated.Key()); r.delegated.Next() {
 		v := r.delegated.Value()
 		v.Version = y.ParseTs(r.delegated.Key())
-		if v.Version > maxVersion {
-			maxVersion = v.Version
+		if !reducedValue.Append(v) {
+			break
 		}
-		reducedValue.Append(v)
+		if v.Version < minVersion {
+			minVersion = v.Version
+		}
+		y.NumTSetFanOutEntities(r.metricEnable, 1)
 	}
-	r.k = y.KeyWithTs(k, maxVersion)
+	r.k = y.KeyWithTs(k, minVersion)
 	val, _ := reducedValue.Marshal()
 	r.v = y.ValueStruct{
 		Value: val,
 	}
+	y.NumTSetFanOut(r.metricEnable, 1)
 }
 
-func NewReducedUniIterator(delegated y.Iterator, compressLevel int) *ReducedUniIterator {
-	return &ReducedUniIterator{
+type ReducedUniIteratorOptions func(iterator *ReducedUniIterator)
+
+func WithMetricEnable(metricEnable bool) ReducedUniIteratorOptions {
+	return func(iterator *ReducedUniIterator) {
+		iterator.metricEnable = metricEnable
+	}
+}
+
+func NewReducedUniIterator(delegated y.Iterator, compressLevel, valueSize int, opt ...ReducedUniIteratorOptions) *ReducedUniIterator {
+	r := &ReducedUniIterator{
 		delegated:     delegated,
 		compressLevel: compressLevel,
+		valueSize:     valueSize,
 	}
+	for _, option := range opt {
+		option(r)
+	}
+	return r
 }
 
 func Uint16ToBytes(u uint16) []byte {
@@ -131,17 +149,37 @@ type ReducedValue struct {
 	val           []byte
 	len           uint32
 	num           uint32
-	CompressLevel int
+	compressLevel int
+	valueSize     int
+	metricEnable  bool
 }
 
-func (r *ReducedValue) Append(val y.ValueStruct) {
+func NewReducedValue(compressLevel, valueSize int) *ReducedValue {
+	if compressLevel == 0 {
+		compressLevel = 3
+	}
+	if valueSize == 0 {
+		valueSize = math.MaxInt64
+	}
+	return &ReducedValue{
+		compressLevel: compressLevel,
+		valueSize:     valueSize,
+	}
+}
+
+func (r *ReducedValue) Append(val y.ValueStruct) bool {
 	v := val.Value
+	vLen := len(v)
+	if r.valBuff.Len()+vLen > r.valueSize {
+		return false
+	}
 	offset := uint32(len(r.valBuff.Bytes()))
-	r.valBuff.Write(Uint32ToBytes(uint32(len(v))))
+	r.valBuff.Write(Uint32ToBytes(uint32(vLen)))
 	r.valBuff.Write(v)
 	r.tsBuff.Write(Uint64ToBytes(val.Version))
 	r.tsBuff.Write(Uint32ToBytes(offset))
 	r.num = r.num + 1
+	return true
 }
 
 func (r *ReducedValue) Marshal() (data []byte, err error) {
@@ -152,12 +190,14 @@ func (r *ReducedValue) Marshal() (data []byte, err error) {
 	data = append(data, Uint32ToBytes(r.len)...)
 	data = append(data, val...)
 	data = append(data, r.tsBuff.Bytes()...)
-	if r.CompressLevel > -1 {
-		l := len(data)
+	l := len(data)
+	y.NumTSetFanOutSize(r.metricEnable, int64(l))
+	if r.compressLevel > -1 {
 		dst := make([]byte, 0, y.ZSTDCompressBound(l))
-		if dst, err = y.ZSTDCompress(dst, data, r.CompressLevel); err != nil {
+		if dst, err = y.ZSTDCompress(dst, data, r.compressLevel); err != nil {
 			return nil, err
 		}
+		y.NumTSetFanOutCompressedSize(r.metricEnable, int64(len(dst)))
 		result := make([]byte, 0, len(dst)+2)
 		result = append(result, Uint16ToBytes(uint16(l))...)
 		result = append(result, dst...)
@@ -168,7 +208,7 @@ func (r *ReducedValue) Marshal() (data []byte, err error) {
 
 func (r *ReducedValue) Unmarshal(rawData []byte) (err error) {
 	var data []byte
-	if r.CompressLevel > -1 {
+	if r.compressLevel > -1 {
 		size := BytesToUint16(rawData[:2])
 		if data, err = y.ZSTDDecompress(make([]byte, 0, size), rawData[2:]); err != nil {
 			return err
