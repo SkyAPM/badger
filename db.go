@@ -31,15 +31,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/ristretto"
+	"github.com/dgraph-io/ristretto/z"
+	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/ristretto"
-	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -132,6 +133,9 @@ type DB struct {
 	compressValue bool
 	compressLevel int
 	valueSize     int
+
+	// Merge compaction
+	mergeFunc MergeFunc
 }
 
 const (
@@ -259,6 +263,7 @@ func Open(opt Options) (*DB, error) {
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
+		mergeFunc:        opt.MergeFunc,
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {

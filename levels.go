@@ -32,12 +32,13 @@ import (
 
 	otrace "go.opencensus.io/trace"
 
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/ristretto/z"
-	"github.com/pkg/errors"
 )
 
 type levelsController struct {
@@ -673,8 +674,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	}
 
 	var (
-		lastKey, skipKey       []byte
-		numBuilds, numVersions int
+		lastKey, skipKey, mergedValue []byte
+		numBuilds, numVersions        int
 		// Denotes if the first key is a series of duplicate keys had
 		// "DiscardEarlierVersions" set
 		firstKeyHasDiscardSet bool
@@ -715,6 +716,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 					// not divided across multiple tables at the same level.
 					break
 				}
+
+				if mergedValue != nil {
+					writeToBuilder(lastKey, builder, mergedValue)
+					mergedValue = nil
+				}
+
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
 				firstKeyHasDiscardSet = it.Value().Meta&BitDiscardEarlierVersions > 0
@@ -740,6 +747,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
+
+			if vs.Meta&bitMergeEntry > 0 && s.kv.mergeFunc != nil {
+				fn := s.kv.mergeFunc
+				mergedValue = fn(mergedValue, vs.Value)
+				continue
+			}
 
 			isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
 
@@ -799,6 +812,10 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				builder.Add(it.Key(), vs, vp.Len)
 			}
 		}
+		if mergedValue != nil {
+			writeToBuilder(lastKey, builder, mergedValue)
+			mergedValue = nil
+		}
 		s.kv.opt.Debugf("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
 	} // End of function: addKeys
@@ -856,6 +873,20 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	}
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
+}
+
+func writeToBuilder(key []byte, builder *table.Builder, mergedValue []byte) {
+	value := y.ValueStruct{
+		Value:   mergedValue,
+		Version: y.ParseTs(key),
+		Meta:    bitMergeEntry,
+	}
+
+	var vp valuePointer
+	if value.Meta&bitValuePointer > 0 {
+		vp.Decode(value.Value)
+	}
+	builder.Add(key, value, vp.Len)
 }
 
 // compactBuildTables merges topTables and botTables to form a list of new tables.

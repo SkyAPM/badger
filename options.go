@@ -130,6 +130,9 @@ type Options struct {
 	maxBatchSize  int64 // max batch size in bytes
 
 	maxValueThreshold float64
+
+	// Merge compaction
+	MergeFunc MergeFunc
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
