@@ -71,7 +71,13 @@ func (db *DB) Get(key []byte) (y.ValueStruct, error) {
 	}
 	vs, err := db.get(key)
 	if err != nil {
-		return y.ValueStruct{}, err
+		return y.ValueStruct{}, y.Wrapf(err, "DB::Get key: %q", key)
+	}
+	if vs.Value == nil && vs.Meta == 0 {
+		return y.ValueStruct{}, ErrKeyNotFound
+	}
+	if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+		return y.ValueStruct{}, ErrKeyNotFound
 	}
 	result := y.ValueStruct{}
 	result.Meta = vs.Meta
@@ -83,16 +89,6 @@ func (db *DB) Get(key []byte) (y.ValueStruct, error) {
 }
 
 func (db *DB) Put(key, val []byte) error {
-	switch {
-	case len(key) == 0:
-		return ErrEmptyKey
-	case bytes.HasPrefix(key, badgerPrefix):
-		return ErrInvalidKey
-	case len(key) > maxKeySize:
-		return exceedsSize("Key", maxKeySize, key)
-	case int64(len(val)) > db.opt.ValueLogFileSize:
-		return exceedsSize("Value", db.opt.ValueLogFileSize, val)
-	}
 	req, err := db.write(key, val)
 	if err != nil {
 		return err
@@ -116,6 +112,16 @@ func (db *DB) PutAsync(key, val []byte, f func(error)) error {
 }
 
 func (db *DB) write(key, val []byte) (*request, error) {
+	switch {
+	case len(key) == 0:
+		return nil, ErrEmptyKey
+	case bytes.HasPrefix(key, badgerPrefix):
+		return nil, ErrInvalidKey
+	case len(key) > maxKeySize:
+		return nil, exceedsSize("Key", maxKeySize, key)
+	case int64(len(val)) > db.opt.ValueLogFileSize:
+		return nil, exceedsSize("Value", db.opt.ValueLogFileSize, val)
+	}
 	entry := &Entry{
 		Key:   key,
 		Value: val,
