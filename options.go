@@ -132,7 +132,8 @@ type Options struct {
 	maxValueThreshold float64
 
 	// Merge compaction
-	MergeFunc MergeFunc
+	MergeFunc     MergeFunc
+	FlushCallBack func()
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

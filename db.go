@@ -135,7 +135,8 @@ type DB struct {
 	valueSize     int
 
 	// Merge compaction
-	mergeFunc MergeFunc
+	mergeFunc     MergeFunc
+	flushCallback func()
 }
 
 const (
@@ -264,6 +265,7 @@ func Open(opt Options) (*DB, error) {
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
 		mergeFunc:        opt.MergeFunc,
+		flushCallback:    opt.FlushCallBack,
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -1212,6 +1214,9 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 					if cb != nil {
 						cb()
 					}
+				}
+				if db.flushCallback != nil {
+					db.flushCallback()
 				}
 				break
 			}
