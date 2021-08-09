@@ -24,7 +24,7 @@ func TestWriteViaIterator(t *testing.T) {
 		}
 
 		// Hand over iterator to Badger.
-		require.NoError(t, db.HandoverIterator(s.NewUniIterator(false), nil))
+		require.NoError(t, db.HandoverIterator(s.NewUniIterator(false)))
 
 		// Read the data back.
 		itr := db.NewIterator(DefaultIteratorOptions)

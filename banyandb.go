@@ -9,7 +9,8 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 )
 
-func (db *DB) HandoverIterator(it y.Iterator, callback func()) error {
+//HandoverIterator MUST run serially.
+func (db *DB) HandoverIterator(it y.Iterator) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
@@ -29,25 +30,16 @@ func (db *DB) HandoverIterator(it y.Iterator, callback func()) error {
 	}
 	reqs := []*request{req}
 	db.pub.sendUpdates(reqs)
-	select {
-	//check flush room
-	case db.flushChan <- flushTask{}:
-		for {
-			err := db.handleFlushTask(flushTask{itr: it, cb: callback})
-			if err == nil {
-				if callback != nil {
-					callback()
-				}
-				break
-			}
-			// Encountered error. Retry indefinitely.
-			db.opt.Errorf("Failure while flushing iterator to disk: %v. Retrying...\n", err)
-			time.Sleep(time.Second)
+	for {
+		err := db.handleFlushTask(flushTask{itr: it})
+		if err == nil {
+			break
 		}
-		return nil
-	default:
-		return errNoRoom
+		// Encountered error. Retry indefinitely.
+		db.opt.Errorf("Failure while flushing iterator to disk: %v. Retrying...\n", err)
+		time.Sleep(time.Second)
 	}
+	return nil
 }
 
 func (db *DB) NewIterator(opt IteratorOptions) y.Iterator {
