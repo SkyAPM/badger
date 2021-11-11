@@ -74,37 +74,3 @@ func TestPutAndGet(t *testing.T) {
 		require.Equal(t, 100, i)
 	})
 }
-
-func TestPrefix(t *testing.T) {
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%010d", i))
-	}
-	val := func(i int) []byte {
-		return []byte(fmt.Sprintf("%0128d", i))
-	}
-	opt := DefaultOptions("")
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		for i := 0; i < 100; i++ {
-			require.NoError(t, db.Put(y.KeyWithTs(key(i), 101), val(i)))
-		}
-
-		opts := DefaultIteratorOptions
-		opts.Prefix = []byte("000000003")
-		itr := db.NewIterator(opts)
-		defer itr.Close()
-
-		i := 30
-		for itr.Seek(nil); itr.Valid(); itr.Next() {
-			item := itr.Value()
-			require.Equal(t, string(key(i)), string(y.ParseKey(itr.Key())))
-			require.Equal(t, uint64(101), y.ParseTs(itr.Key()))
-			require.Equal(t, val(i), item.Value)
-			valFromGet, err := db.Get(itr.Key())
-			require.NoError(t, err)
-			require.Equal(t, val(i), valFromGet.Value)
-			require.Equal(t, uint64(101), valFromGet.Version)
-			i++
-		}
-		require.Equal(t, 40, i)
-	})
-}

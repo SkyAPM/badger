@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/v3/bydb"
 )
 
 type arg struct {
@@ -67,8 +69,14 @@ type verifyFunc func(t *testing.T, tt test, s *TSet, wantErr bool)
 
 func runTest(t *testing.T, tt test, f verifyFunc) {
 	var dir string
+	encoderFactory := func() bydb.TSetEncoder {
+		return bydb.NewBlockEncoder(tt.valueSize)
+	}
+	decoderFactory := func() bydb.TSetDecoder {
+		return new(bydb.BlockDecoder)
+	}
 	runTSetTest(t, "", func(t *testing.T, db *DB) {
-		s := NewTSet(db, 3, tt.valueSize)
+		s := NewTSet(db, WithEncoderFactory(encoderFactory), WithDecoderFactory(decoderFactory))
 		dir = db.opt.Dir
 
 		for _, arg := range tt.args {
@@ -82,7 +90,7 @@ func runTest(t *testing.T, tt test, f verifyFunc) {
 	})
 	defer removeDir(dir)
 	runTSetTest(t, dir, func(t *testing.T, db *DB) {
-		f(t, tt, NewTSet(db, 3, tt.valueSize), tt.wantVLGetErr)
+		f(t, tt, NewTSet(db, WithEncoderFactory(encoderFactory), WithDecoderFactory(decoderFactory)), tt.wantVLGetErr)
 	})
 }
 
@@ -123,8 +131,9 @@ func TestTSetGetALL(t *testing.T) {
 			args:      inputData,
 		},
 		{
-			name: "default value size",
-			args: inputData,
+			name:      "minimal value size",
+			valueSize: 11,
+			args:      inputData,
 		},
 	}
 	for _, tt := range tests {

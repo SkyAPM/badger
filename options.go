@@ -27,6 +27,7 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
@@ -132,8 +133,9 @@ type Options struct {
 	maxValueThreshold float64
 
 	// Merge compaction
-	MergeFunc     MergeFunc
-	FlushCallBack func()
+	FlushCallBack  func()
+	EncoderFactory bydb.TSetEncoderFactory
+	DecoderFactory bydb.TSetDecoderFactory
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -820,4 +822,11 @@ func (opt Options) getFileFlags() int {
 		flags |= os.O_RDWR
 	}
 	return flags
+}
+
+// WithExternalCompactor returns a new Options value with external TSetEncoder and TSetDecoder
+func (opt Options) WithExternalCompactor(encoder bydb.TSetEncoderFactory, decoder bydb.TSetDecoderFactory) Options {
+	opt.EncoderFactory = encoder
+	opt.DecoderFactory = decoder
+	return opt
 }

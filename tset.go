@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/pkg/errors"
+
+	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/pkg/errors"
 )
 
 var ErrTSetInvalidTS = errors.New("Timestamp should be greater than 0")
@@ -18,17 +20,36 @@ var ErrTSetInvalidTS = errors.New("Timestamp should be greater than 0")
 // the ExtractFunc helps Get method to extract reduced values from the "vault" created by table.ReduceFunc.
 // TSet also provide GetAll which needs a SplitFunc to retrieve all values in the same key.
 type TSet struct {
-	db *DB
+	db             *DB
+	encoderFactory bydb.TSetEncoderFactory
+	decoderFactory bydb.TSetDecoderFactory
 }
 
-func NewTSet(db *DB, compressLevel, valueSize int) *TSet {
-	db.compressValue = true
-	db.compressLevel = compressLevel
-	db.valueSize = valueSize
+type TSetOptions func(tSet *TSet)
+
+func WithEncoderFactory(encoderFactory bydb.TSetEncoderFactory) TSetOptions {
+	return func(tSet *TSet) {
+		tSet.encoderFactory = encoderFactory
+	}
+}
+
+func WithDecoderFactory(decoderFactory bydb.TSetDecoderFactory) TSetOptions {
+	return func(tSet *TSet) {
+		tSet.decoderFactory = decoderFactory
+	}
+}
+
+func NewTSet(db *DB, opts ...TSetOptions) *TSet {
 	db.opt.NumVersionsToKeep = math.MaxInt64
-	return &TSet{
+	tSet := &TSet{
 		db: db,
 	}
+	for _, option := range opts {
+		option(tSet)
+	}
+	db.encoderFactory = tSet.encoderFactory
+	db.decoderFactory = tSet.decoderFactory
+	return tSet
 }
 
 func (s *TSet) Put(key, val []byte, ts uint64) error {
@@ -97,11 +118,11 @@ func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 	if vs.Value == nil {
 		return nil, nil
 	}
-	var rVal *table.ReducedValue
-	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
+	decoder := s.decoderFactory()
+	if err = decoder.Decode(vs.Value); err != nil {
 		return nil, err
 	}
-	return rVal.Get(ts)
+	return decoder.Get(ts)
 }
 
 func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
@@ -120,24 +141,24 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 	if vs.Value == nil {
 		return nil, nil
 	}
-	var rVal *table.ReducedValue
-	if rVal, err = s.unmarshalValue(vs.Value); err != nil {
+	var decoder bydb.TSetDecoder
+	if decoder, err = s.unmarshalValue(vs.Value); err != nil {
 		return nil, err
 	}
-	iter := rVal.Iter(false)
-	val = make([][]byte, 0, rVal.Len())
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		val = append(val, iter.Value().Value)
+	iter := decoder.Iterator()
+	val = make([][]byte, 0, decoder.Len())
+	for iter.Next() {
+		val = append(val, iter.Val())
 	}
 	return val, nil
 }
 
-func (s *TSet) unmarshalValue(val []byte) (*table.ReducedValue, error) {
-	rVal := table.NewReducedValue(s.db.compressLevel, s.db.valueSize)
-	if err := rVal.Unmarshal(val); err != nil {
+func (s *TSet) unmarshalValue(val []byte) (bydb.TSetDecoder, error) {
+	decoder := s.decoderFactory()
+	if err := decoder.Decode(val); err != nil {
 		return nil, fmt.Errorf("failed unmarshal value: %w", err)
 	}
-	return rVal, nil
+	return decoder, nil
 }
 
 func (s *TSet) seekMemTables(prefix []byte) [][]byte {
@@ -149,7 +170,9 @@ func (s *TSet) seekMemTables(prefix []byte) [][]byte {
 		iters = append(iters, tables[i].sl.NewUniIterator(false))
 	}
 	it := table.NewMergeIterator(iters, false)
-	defer it.Close()
+	defer func(it y.Iterator) {
+		_ = it.Close()
+	}(it)
 	r := make([][]byte, 0)
 	for it.Seek(y.KeyWithTs(prefix, math.MaxUint64)); it.Valid() && bytes.HasPrefix(it.Key(), prefix); it.Next() {
 		r = append(r, it.Value().Value)

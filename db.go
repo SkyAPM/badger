@@ -36,6 +36,7 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
@@ -130,12 +131,10 @@ type DB struct {
 	allocPool  *z.AllocatorPool
 
 	//TSet related
-	compressValue bool
-	compressLevel int
-	valueSize     int
+	encoderFactory bydb.TSetEncoderFactory
+	decoderFactory bydb.TSetDecoderFactory
 
 	// Merge compaction
-	mergeFunc     MergeFunc
 	flushCallback func()
 }
 
@@ -264,8 +263,9 @@ func Open(opt Options) (*DB, error) {
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
-		mergeFunc:        opt.MergeFunc,
 		flushCallback:    opt.FlushCallBack,
+		encoderFactory:   opt.EncoderFactory,
+		decoderFactory:   opt.DecoderFactory,
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -1231,10 +1231,12 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 }
 
 func getIterator(db *DB, iterator *skl.UniIterator) y.Iterator {
-	if !db.compressValue {
+	if db.encoderFactory == nil {
 		return iterator
 	}
-	return table.NewReducedUniIterator(iterator, db.compressLevel, db.valueSize, table.WithMetricEnable(db.opt.MetricsEnabled))
+	return table.NewReducedUniIterator(iterator,
+		table.WithMetricEnable(db.opt.MetricsEnabled),
+		table.WithEncoder(db.encoderFactory()))
 }
 
 func exists(path string) (bool, error) {

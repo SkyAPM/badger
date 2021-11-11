@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
@@ -674,12 +675,44 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	}
 
 	var (
-		lastKey, skipKey, mergedValue []byte
-		numBuilds, numVersions        int
+		lastKey, skipKey       []byte
+		numBuilds, numVersions int
 		// Denotes if the first key is a series of duplicate keys had
 		// "DiscardEarlierVersions" set
 		firstKeyHasDiscardSet bool
+		externalEncoder       bydb.TSetEncoder
+		externalDecoder       bydb.TSetDecoder
 	)
+	if s.kv.encoderFactory != nil {
+		externalEncoder = s.kv.encoderFactory()
+	}
+	if s.kv.decoderFactory != nil {
+		externalDecoder = s.kv.decoderFactory()
+	}
+
+	encode := func(key []byte, builder *table.Builder) {
+		if externalEncoder == nil {
+			return
+		}
+		encodedValue, err := externalEncoder.Encode()
+		if err != nil {
+			if errors.Is(err, bydb.ErrEncodeEmpty) {
+				return
+			}
+			s.kv.opt.Errorf("failed to encode: %v", err)
+		} else {
+			meta := bydb.BitCompact
+			if externalEncoder.IsFull() {
+				meta = 0
+			}
+			builder.Add(y.KeyWithTs(y.ParseKey(key), externalEncoder.StartTime()), y.ValueStruct{
+				Value:   encodedValue,
+				Version: externalEncoder.StartTime(),
+				Meta:    meta,
+			}, 0)
+		}
+		externalEncoder.Reset()
+	}
 
 	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
@@ -717,10 +750,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 					break
 				}
 
-				if mergedValue != nil {
-					writeToBuilder(lastKey, builder, mergedValue)
-					mergedValue = nil
-				}
+				encode(lastKey, builder)
 
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
@@ -748,10 +778,32 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
 
-			if vs.Meta&bitMergeEntry > 0 && s.kv.mergeFunc != nil {
-				fn := s.kv.mergeFunc
-				mergedValue = fn(mergedValue, vs.Value)
-				continue
+			if vs.Meta&bydb.BitCompact > 0 {
+				if externalDecoder != nil && externalEncoder != nil {
+					err := externalDecoder.Decode(vs.Value)
+					if err != nil {
+						s.kv.opt.Errorf("failed to decode %s with %d : %v",
+							hex.EncodeToString(y.ParseKey(it.Key())), y.ParseTs(it.Key()), err)
+					} else {
+						if externalDecoder.IsFull() {
+							// Clear compact flag
+							vs.Meta = vs.Meta &^ bydb.BitCompact
+							encode(lastKey, builder)
+						} else {
+							// Start from the latest version
+							iter := externalDecoder.Iterator()
+							for iter.Next() {
+								externalEncoder.Append(iter.Time(), iter.Val())
+								if externalEncoder.IsFull() {
+									encode(it.Key(), builder)
+								}
+							}
+							continue
+						}
+					}
+				}
+			} else {
+				encode(lastKey, builder)
 			}
 
 			isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
@@ -812,10 +864,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				builder.Add(it.Key(), vs, vp.Len)
 			}
 		}
-		if mergedValue != nil {
-			writeToBuilder(lastKey, builder, mergedValue)
-			mergedValue = nil
-		}
+		encode(lastKey, builder)
 		s.kv.opt.Debugf("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
 	} // End of function: addKeys
@@ -873,20 +922,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	}
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
-}
-
-func writeToBuilder(key []byte, builder *table.Builder, mergedValue []byte) {
-	value := y.ValueStruct{
-		Value:   mergedValue,
-		Version: y.ParseTs(key),
-		Meta:    bitMergeEntry,
-	}
-
-	var vp valuePointer
-	if value.Meta&bitValuePointer > 0 {
-		vp.Decode(value.Value)
-	}
-	builder.Add(key, value, vp.Len)
 }
 
 // compactBuildTables merges topTables and botTables to form a list of new tables.

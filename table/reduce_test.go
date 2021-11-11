@@ -5,8 +5,10 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/dgraph-io/badger/v3/y"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dgraph-io/badger/v3/bydb"
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 func newReducedSimpleIterator(keys []k, vals []string) y.Iterator {
@@ -201,13 +203,11 @@ func TestReducedUniIterator(t *testing.T) {
 			},
 			want: want{
 				keys: []k{
-					{"k2", 3},
 					{"k2", 1},
 					{"k3", 0},
 				},
 				vals: [][]k{
-					{{"is", 8}, {"keep", 7}, {"it", 3}},
-					{{"simple", 1}},
+					{{"is", 8}, {"keep", 7}, {"it", 3}, {"simple", 1}},
 					{{"stupid", 0}},
 				},
 			},
@@ -215,7 +215,7 @@ func TestReducedUniIterator(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			iter := NewReducedUniIterator(newReducedSimpleIterator(tt.input.keys, tt.input.vals), 3, tt.valueSize)
+			iter := NewReducedUniIterator(newReducedSimpleIterator(tt.input.keys, tt.input.vals), WithEncoder(bydb.NewBlockEncoder(tt.valueSize)))
 			if tt.seekKey != nil {
 				iter.Seek(tt.seekKey)
 				assert.Equal(t, tt.want, get(t, iter))
@@ -236,69 +236,14 @@ func get(t *testing.T, iter y.Iterator) (got want) {
 			key: string(y.ParseKey(iter.Key())),
 			ts:  y.ParseTs(iter.Key()),
 		})
-		rVal := NewReducedValue(0, 0)
-		assert.NoError(t, rVal.Unmarshal(iter.Value().Value))
-		iterator := rVal.Iter(false)
+		rVal := bydb.BlockDecoder{}
+		assert.NoError(t, rVal.Decode(iter.Value().Value))
+		iterator := rVal.Iterator()
 		kk := make([]k, 0, rVal.Len())
-		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
-			kk = append(kk, k{key: string(iterator.Value().Value), ts: BytesToUint64(iterator.Key())})
+		for iterator.Next() {
+			kk = append(kk, k{key: string(iterator.Val()), ts: iterator.Time()})
 		}
 		got.vals = append(got.vals, kk)
 	}
 	return
-}
-
-func TestReducedValue(t *testing.T) {
-	rVal := NewReducedValue(0, 0)
-	rVal.Append(y.ValueStruct{
-		Value:   []byte("simple"),
-		Version: 7,
-	})
-	rVal.Append(y.ValueStruct{
-		Value:   []byte("it"),
-		Version: 5,
-	})
-	rVal.Append(y.ValueStruct{
-		Value:   []byte("keep"),
-		Version: 0,
-	})
-	data, err := rVal.Marshal()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, data)
-	rVal = NewReducedValue(0, 0)
-	assert.NoError(t, rVal.Unmarshal(data))
-
-	value, errGet := rVal.Get(5)
-	assert.NoError(t, errGet)
-	assert.Equal(t, []byte("it"), value)
-	value, errGet = rVal.Get(3)
-	assert.Error(t, errGet)
-
-	iter := rVal.Iter(true)
-	expectIter(t, iter, []uint64{0, 5, 7}, []string{"keep", "it", "simple"})
-	expectIter(t, iter, []uint64{5, 7}, []string{"it", "simple"}, 1)
-	expectIter(t, iter, []uint64{5, 7}, []string{"it", "simple"}, 5)
-	expectIter(t, iter, []uint64{7}, []string{"simple"}, 6)
-	expectIter(t, iter, []uint64{}, []string{}, 9)
-
-	iter = rVal.Iter(false)
-	expectIter(t, iter, []uint64{7, 5, 0}, []string{"simple", "it", "keep"})
-	expectIter(t, iter, []uint64{5, 0}, []string{"it", "keep"}, 6)
-	expectIter(t, iter, []uint64{5, 0}, []string{"it", "keep"}, 5)
-	expectIter(t, iter, []uint64{0}, []string{"keep"}, 1)
-}
-
-func expectIter(t *testing.T, iter y.Iterator, wantTss []uint64, wantStrings []string, searchKey ...uint64) {
-	tss := make([]uint64, 0)
-	strings := make([]string, 0)
-	iter.Rewind()
-	if len(searchKey) > 0 {
-		iter.Seek(Uint64ToBytes(searchKey[0]))
-	}
-	for ; iter.Valid(); iter.Next() {
-		tss = append(tss, BytesToUint64(iter.Key()))
-		strings = append(strings, string(iter.Value().Value))
-	}
-	assert.Equal(t, wantTss, tss)
-	assert.Equal(t, wantStrings, strings)
 }
