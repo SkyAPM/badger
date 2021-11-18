@@ -705,13 +705,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			if externalEncoder.IsFull() {
 				meta = 0
 			}
-			builder.Add(y.KeyWithTs(y.ParseKey(key), externalEncoder.StartTime()), y.ValueStruct{
+			builder.Add(y.KeyWithTs(key, externalEncoder.StartTime()), y.ValueStruct{
 				Value:   encodedValue,
 				Version: externalEncoder.StartTime(),
 				Meta:    meta,
 			}, 0)
 		}
-		externalEncoder.Reset()
 	}
 
 	addKeys := func(builder *table.Builder) {
@@ -738,6 +737,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				}
 			}
 
+			currKey := y.ParseKey(it.Key())
 			if !y.SameKey(it.Key(), lastKey) {
 				firstKeyHasDiscardSet = false
 				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
@@ -750,7 +750,10 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 					break
 				}
 
-				encode(lastKey, builder)
+				encode(y.ParseKey(lastKey), builder)
+				if externalEncoder != nil {
+					externalEncoder.Reset(currKey)
+				}
 
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
@@ -780,7 +783,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			if vs.Meta&bydb.BitCompact > 0 {
 				if externalDecoder != nil && externalEncoder != nil {
-					err := externalDecoder.Decode(vs.Value)
+					err := externalDecoder.Decode(currKey, vs.Value)
 					if err != nil {
 						s.kv.opt.Errorf("failed to decode %s with %d : %v",
 							hex.EncodeToString(y.ParseKey(it.Key())), y.ParseTs(it.Key()), err)
@@ -788,14 +791,14 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 						if externalDecoder.IsFull() {
 							// Clear compact flag
 							vs.Meta = vs.Meta &^ bydb.BitCompact
-							encode(lastKey, builder)
+							encode(currKey, builder)
 						} else {
 							// Start from the latest version
 							iter := externalDecoder.Iterator()
 							for iter.Next() {
 								externalEncoder.Append(iter.Time(), iter.Val())
 								if externalEncoder.IsFull() {
-									encode(it.Key(), builder)
+									encode(currKey, builder)
 								}
 							}
 							continue
@@ -803,7 +806,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 					}
 				}
 			} else {
-				encode(lastKey, builder)
+				encode(currKey, builder)
 			}
 
 			isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
@@ -864,7 +867,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				builder.Add(it.Key(), vs, vp.Len)
 			}
 		}
-		encode(lastKey, builder)
+		encode(y.ParseKey(lastKey), builder)
 		s.kv.opt.Debugf("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
 	} // End of function: addKeys

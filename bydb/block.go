@@ -49,7 +49,7 @@ func (t *BlockEncoder) IsFull() bool {
 	return t.valBuff.Len() >= t.valueSize
 }
 
-func (t *BlockEncoder) Reset() {
+func (t *BlockEncoder) Reset(_ []byte) {
 	t.tsBuff.Reset()
 	t.valBuff.Reset()
 	t.num = 0
@@ -125,7 +125,7 @@ func (t *BlockDecoder) Len() int {
 	return int(t.num)
 }
 
-func (t *BlockDecoder) Decode(rawData []byte) (err error) {
+func (t *BlockDecoder) Decode(_, rawData []byte) (err error) {
 	var data []byte
 	size := binary.LittleEndian.Uint16(rawData[len(rawData)-2:])
 	if data, err = y.ZSTDDecompress(make([]byte, 0, size), rawData[:len(rawData)-2]); err != nil {

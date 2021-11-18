@@ -119,7 +119,7 @@ func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 		return nil, nil
 	}
 	decoder := s.decoderFactory()
-	if err = decoder.Decode(vs.Value); err != nil {
+	if err = decoder.Decode(key, vs.Value); err != nil {
 		return nil, err
 	}
 	return decoder.Get(ts)
@@ -142,7 +142,7 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 		return nil, nil
 	}
 	var decoder bydb.TSetDecoder
-	if decoder, err = s.unmarshalValue(vs.Value); err != nil {
+	if decoder, err = s.unmarshalValue(key, vs.Value); err != nil {
 		return nil, err
 	}
 	iter := decoder.Iterator()
@@ -153,9 +153,9 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 	return val, nil
 }
 
-func (s *TSet) unmarshalValue(val []byte) (bydb.TSetDecoder, error) {
+func (s *TSet) unmarshalValue(key []byte, val []byte) (bydb.TSetDecoder, error) {
 	decoder := s.decoderFactory()
-	if err := decoder.Decode(val); err != nil {
+	if err := decoder.Decode(key, val); err != nil {
 		return nil, fmt.Errorf("failed unmarshal value: %w", err)
 	}
 	return decoder, nil

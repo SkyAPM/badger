@@ -54,8 +54,8 @@ func (r *ReducedUniIterator) reduce() {
 	if !r.delegated.Valid() {
 		return
 	}
-	r.encoder.Reset()
 	k := y.ParseKey(r.delegated.Key())
+	r.encoder.Reset(k)
 	for r.k = r.delegated.Key(); r.delegated.Valid() && y.SameKey(r.k, r.delegated.Key()); r.delegated.Next() {
 		v := r.delegated.Value()
 		y.NumTSetFanOutEntities(r.metricEnable, 1)

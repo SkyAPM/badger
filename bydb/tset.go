@@ -13,7 +13,7 @@ type TSetEncoder interface {
 	// IsFull returns whether the encoded data reached its capacity
 	IsFull() bool
 	// Reset the underlying buffer
-	Reset()
+	Reset(key []byte)
 	// Encode the time series data point to a binary
 	Encode() ([]byte, error)
 	// StartTime indicates the first entry's time
@@ -25,7 +25,7 @@ type TSetEncoderFactory func() TSetEncoder
 // TSetDecoder decodes encoded time series data
 type TSetDecoder interface {
 	// Decode the time series data
-	Decode(data []byte) error
+	Decode(key, data []byte) error
 	// Len denotes the size of iterator
 	Len() int
 	// IsFull returns whether the encoded data reached its capacity

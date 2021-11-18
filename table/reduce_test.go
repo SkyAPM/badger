@@ -237,7 +237,7 @@ func get(t *testing.T, iter y.Iterator) (got want) {
 			ts:  y.ParseTs(iter.Key()),
 		})
 		rVal := bydb.BlockDecoder{}
-		assert.NoError(t, rVal.Decode(iter.Value().Value))
+		assert.NoError(t, rVal.Decode(nil, iter.Value().Value))
 		iterator := rVal.Iterator()
 		kk := make([]k, 0, rVal.Len())
 		for iterator.Next() {
