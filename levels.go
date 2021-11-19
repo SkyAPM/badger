@@ -681,19 +681,16 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		// "DiscardEarlierVersions" set
 		firstKeyHasDiscardSet bool
 		externalEncoder       bydb.TSetEncoder
-		externalDecoder       bydb.TSetDecoder
 	)
-	if s.kv.encoderFactory != nil {
-		externalEncoder = s.kv.encoderFactory()
-	}
-	if s.kv.decoderFactory != nil {
-		externalDecoder = s.kv.decoderFactory()
-	}
 
 	encode := func(key []byte, builder *table.Builder) {
 		if externalEncoder == nil {
 			return
 		}
+		defer func() {
+			s.kv.encoderPool.Put(externalEncoder)
+			externalEncoder = nil
+		}()
 		encodedValue, err := externalEncoder.Encode()
 		if err != nil {
 			if errors.Is(err, bydb.ErrEncodeEmpty) {
@@ -711,6 +708,41 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				Meta:    meta,
 			}, 0)
 		}
+	}
+
+	merge := func(currKey []byte, vs *y.ValueStruct, builder *table.Builder) bool {
+		if s.kv.decoderPool == nil || s.kv.encoderPool == nil {
+			return false
+		}
+
+		decoderPool := s.kv.decoderPool
+		decoder := decoderPool.Get(currKey)
+		defer decoderPool.Put(decoder)
+		err := decoder.Decode(currKey, vs.Value)
+		if err != nil {
+			s.kv.opt.Errorf("failed to decode %s with %d : %v",
+				hex.EncodeToString(y.ParseKey(it.Key())), y.ParseTs(it.Key()), err)
+			return false
+		}
+		if decoder.IsFull() {
+			// Clear compact flag
+			encode(currKey, builder)
+			vs.Meta = vs.Meta &^ bydb.BitCompact
+			return false
+		}
+		if externalEncoder == nil {
+			externalEncoder = s.kv.encoderPool.Get(currKey)
+			externalEncoder.Reset(currKey)
+		}
+		// Start from the latest version
+		iter := decoder.Iterator()
+		for iter.Next() {
+			externalEncoder.Append(iter.Time(), iter.Val())
+			if externalEncoder.IsFull() {
+				encode(currKey, builder)
+			}
+		}
+		return true
 	}
 
 	addKeys := func(builder *table.Builder) {
@@ -751,9 +783,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				}
 
 				encode(y.ParseKey(lastKey), builder)
-				if externalEncoder != nil {
-					externalEncoder.Reset(currKey)
-				}
 
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
@@ -782,28 +811,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			version := y.ParseTs(it.Key())
 
 			if vs.Meta&bydb.BitCompact > 0 {
-				if externalDecoder != nil && externalEncoder != nil {
-					err := externalDecoder.Decode(currKey, vs.Value)
-					if err != nil {
-						s.kv.opt.Errorf("failed to decode %s with %d : %v",
-							hex.EncodeToString(y.ParseKey(it.Key())), y.ParseTs(it.Key()), err)
-					} else {
-						if externalDecoder.IsFull() {
-							// Clear compact flag
-							vs.Meta = vs.Meta &^ bydb.BitCompact
-							encode(currKey, builder)
-						} else {
-							// Start from the latest version
-							iter := externalDecoder.Iterator()
-							for iter.Next() {
-								externalEncoder.Append(iter.Time(), iter.Val())
-								if externalEncoder.IsFull() {
-									encode(currKey, builder)
-								}
-							}
-							continue
-						}
-					}
+				if merge(currKey, &vs, builder) {
+					continue
 				}
 			} else {
 				encode(currKey, builder)

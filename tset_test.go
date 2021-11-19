@@ -69,14 +69,10 @@ type verifyFunc func(t *testing.T, tt test, s *TSet, wantErr bool)
 
 func runTest(t *testing.T, tt test, f verifyFunc) {
 	var dir string
-	encoderFactory := func() bydb.TSetEncoder {
-		return bydb.NewBlockEncoder(tt.valueSize)
-	}
-	decoderFactory := func() bydb.TSetDecoder {
-		return new(bydb.BlockDecoder)
-	}
+	encoderPool := bydb.NewBlockEncoderPool(tt.valueSize)
+	decoderPool := bydb.NewBlockDecoderPool(tt.valueSize)
 	runTSetTest(t, "", func(t *testing.T, db *DB) {
-		s := NewTSet(db, WithEncoderFactory(encoderFactory), WithDecoderFactory(decoderFactory))
+		s := NewTSet(db, WithEncoderPool(encoderPool), WithDecoderPool(decoderPool))
 		dir = db.opt.Dir
 
 		for _, arg := range tt.args {
@@ -90,7 +86,7 @@ func runTest(t *testing.T, tt test, f verifyFunc) {
 	})
 	defer removeDir(dir)
 	runTSetTest(t, dir, func(t *testing.T, db *DB) {
-		f(t, tt, NewTSet(db, WithEncoderFactory(encoderFactory), WithDecoderFactory(decoderFactory)), tt.wantVLGetErr)
+		f(t, tt, NewTSet(db, WithEncoderPool(encoderPool), WithDecoderPool(decoderPool)), tt.wantVLGetErr)
 	})
 }
 

@@ -215,7 +215,7 @@ func TestReducedUniIterator(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			iter := NewReducedUniIterator(newReducedSimpleIterator(tt.input.keys, tt.input.vals), WithEncoder(bydb.NewBlockEncoder(tt.valueSize)))
+			iter := NewReducedUniIterator(newReducedSimpleIterator(tt.input.keys, tt.input.vals), WithEncoderPool(bydb.NewBlockEncoderPool(tt.valueSize)))
 			if tt.seekKey != nil {
 				iter.Seek(tt.seekKey)
 				assert.Equal(t, tt.want, get(t, iter))
@@ -230,13 +230,16 @@ func TestReducedUniIterator(t *testing.T) {
 	}
 }
 
+var decoderPool = bydb.NewBlockDecoderPool(math.MaxInt64)
+
 func get(t *testing.T, iter y.Iterator) (got want) {
+	rVal := decoderPool.Get(y.ParseKey(iter.Key()))
+	defer decoderPool.Put(rVal)
 	for ; iter.Valid(); iter.Next() {
 		got.keys = append(got.keys, k{
 			key: string(y.ParseKey(iter.Key())),
 			ts:  y.ParseTs(iter.Key()),
 		})
-		rVal := bydb.BlockDecoder{}
 		assert.NoError(t, rVal.Decode(nil, iter.Value().Value))
 		iterator := rVal.Iterator()
 		kk := make([]k, 0, rVal.Len())

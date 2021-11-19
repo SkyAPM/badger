@@ -20,22 +20,22 @@ var ErrTSetInvalidTS = errors.New("Timestamp should be greater than 0")
 // the ExtractFunc helps Get method to extract reduced values from the "vault" created by table.ReduceFunc.
 // TSet also provide GetAll which needs a SplitFunc to retrieve all values in the same key.
 type TSet struct {
-	db             *DB
-	encoderFactory bydb.TSetEncoderFactory
-	decoderFactory bydb.TSetDecoderFactory
+	db          *DB
+	encoderPool bydb.TSetEncoderPool
+	decoderPool bydb.TSetDecoderPool
 }
 
 type TSetOptions func(tSet *TSet)
 
-func WithEncoderFactory(encoderFactory bydb.TSetEncoderFactory) TSetOptions {
+func WithEncoderPool(encoderPool bydb.TSetEncoderPool) TSetOptions {
 	return func(tSet *TSet) {
-		tSet.encoderFactory = encoderFactory
+		tSet.encoderPool = encoderPool
 	}
 }
 
-func WithDecoderFactory(decoderFactory bydb.TSetDecoderFactory) TSetOptions {
+func WithDecoderPool(decoderPool bydb.TSetDecoderPool) TSetOptions {
 	return func(tSet *TSet) {
-		tSet.decoderFactory = decoderFactory
+		tSet.decoderPool = decoderPool
 	}
 }
 
@@ -47,8 +47,8 @@ func NewTSet(db *DB, opts ...TSetOptions) *TSet {
 	for _, option := range opts {
 		option(tSet)
 	}
-	db.encoderFactory = tSet.encoderFactory
-	db.decoderFactory = tSet.decoderFactory
+	db.encoderPool = tSet.encoderPool
+	db.decoderPool = tSet.decoderPool
 	return tSet
 }
 
@@ -118,7 +118,8 @@ func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 	if vs.Value == nil {
 		return nil, nil
 	}
-	decoder := s.decoderFactory()
+	decoder := s.decoderPool.Get(key)
+	defer s.decoderPool.Put(decoder)
 	if err = decoder.Decode(key, vs.Value); err != nil {
 		return nil, err
 	}
@@ -141,9 +142,10 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 	if vs.Value == nil {
 		return nil, nil
 	}
-	var decoder bydb.TSetDecoder
-	if decoder, err = s.unmarshalValue(key, vs.Value); err != nil {
-		return nil, err
+	decoder := s.decoderPool.Get(key)
+	defer s.decoderPool.Put(decoder)
+	if err = decoder.Decode(key, vs.Value); err != nil {
+		return nil, fmt.Errorf("failed unmarshal value: %w", err)
 	}
 	iter := decoder.Iterator()
 	val = make([][]byte, 0, decoder.Len())
@@ -151,14 +153,6 @@ func (s *TSet) GetAll(key []byte) (val [][]byte, err error) {
 		val = append(val, iter.Val())
 	}
 	return val, nil
-}
-
-func (s *TSet) unmarshalValue(key []byte, val []byte) (bydb.TSetDecoder, error) {
-	decoder := s.decoderFactory()
-	if err := decoder.Decode(key, val); err != nil {
-		return nil, fmt.Errorf("failed unmarshal value: %w", err)
-	}
-	return decoder, nil
 }
 
 func (s *TSet) seekMemTables(prefix []byte) [][]byte {

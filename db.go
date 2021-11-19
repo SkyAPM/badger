@@ -131,8 +131,8 @@ type DB struct {
 	allocPool  *z.AllocatorPool
 
 	//TSet related
-	encoderFactory bydb.TSetEncoderFactory
-	decoderFactory bydb.TSetDecoderFactory
+	encoderPool bydb.TSetEncoderPool
+	decoderPool bydb.TSetDecoderPool
 
 	// Merge compaction
 	flushCallback func()
@@ -264,8 +264,8 @@ func Open(opt Options) (*DB, error) {
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
 		flushCallback:    opt.FlushCallBack,
-		encoderFactory:   opt.EncoderFactory,
-		decoderFactory:   opt.DecoderFactory,
+		encoderPool:      opt.EncoderPool,
+		decoderPool:      opt.DecoderPool,
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -1231,12 +1231,12 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 }
 
 func getIterator(db *DB, iterator *skl.UniIterator) y.Iterator {
-	if db.encoderFactory == nil {
+	if db.encoderPool == nil {
 		return iterator
 	}
 	return table.NewReducedUniIterator(iterator,
 		table.WithMetricEnable(db.opt.MetricsEnabled),
-		table.WithEncoder(db.encoderFactory()))
+		table.WithEncoderPool(db.encoderPool))
 }
 
 func exists(path string) (bool, error) {

@@ -15,7 +15,7 @@ type ReducedUniIterator struct {
 	k            []byte
 	v            y.ValueStruct
 	metricEnable bool
-	encoder      bydb.TSetEncoder
+	encoderPool  bydb.TSetEncoderPool
 }
 
 func (r *ReducedUniIterator) Rewind() {
@@ -55,20 +55,21 @@ func (r *ReducedUniIterator) reduce() {
 		return
 	}
 	k := y.ParseKey(r.delegated.Key())
-	r.encoder.Reset(k)
+	encoder := r.encoderPool.Get(k)
+	defer r.encoderPool.Put(encoder)
 	for r.k = r.delegated.Key(); r.delegated.Valid() && y.SameKey(r.k, r.delegated.Key()); r.delegated.Next() {
 		v := r.delegated.Value()
 		y.NumTSetFanOutEntities(r.metricEnable, 1)
-		r.encoder.Append(y.ParseTs(r.delegated.Key()), v.Value)
-		if r.encoder.IsFull() {
+		encoder.Append(y.ParseTs(r.delegated.Key()), v.Value)
+		if encoder.IsFull() {
 			r.delegated.Next()
 			break
 		}
 	}
-	r.k = y.KeyWithTs(k, r.encoder.StartTime())
-	val, _ := r.encoder.Encode()
+	r.k = y.KeyWithTs(k, encoder.StartTime())
+	val, _ := encoder.Encode()
 	meta := bydb.BitCompact
-	if r.encoder.IsFull() {
+	if encoder.IsFull() {
 		meta = 0
 	}
 	r.v = y.ValueStruct{
@@ -86,9 +87,9 @@ func WithMetricEnable(metricEnable bool) ReducedUniIteratorOptions {
 	}
 }
 
-func WithEncoder(encoder bydb.TSetEncoder) ReducedUniIteratorOptions {
+func WithEncoderPool(encoderPool bydb.TSetEncoderPool) ReducedUniIteratorOptions {
 	return func(iterator *ReducedUniIterator) {
-		iterator.encoder = encoder
+		iterator.encoderPool = encoderPool
 	}
 }
 

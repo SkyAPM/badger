@@ -6,15 +6,77 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/dgraph-io/badger/v3/y"
 )
 
-var _ TSetEncoder = (*BlockEncoder)(nil)
-var _ TSetDecoder = (*BlockDecoder)(nil)
+var (
+	encoderPool = sync.Pool{
+		New: func() interface{} {
+			return &blockEncoder{}
+		},
+	}
+	decoderPool = sync.Pool{
+		New: func() interface{} {
+			return &blockDecoder{}
+		},
+	}
+)
 
-//BlockEncoder backport to reduced value
-type BlockEncoder struct {
+var (
+	_ TSetEncoder     = (*blockEncoder)(nil)
+	_ TSetDecoder     = (*blockDecoder)(nil)
+	_ TSetEncoderPool = (*blockEncoderPool)(nil)
+)
+
+type blockEncoderPool struct {
+	pool *sync.Pool
+	size int
+}
+
+func NewBlockEncoderPool(size int) TSetEncoderPool {
+	return &blockEncoderPool{
+		pool: &encoderPool,
+		size: size,
+	}
+}
+
+func (b *blockEncoderPool) Get(metadata []byte) TSetEncoder {
+	encoder := b.pool.Get().(*blockEncoder)
+	encoder.Reset(metadata)
+	encoder.valueSize = b.size
+	return encoder
+}
+
+func (b *blockEncoderPool) Put(encoder TSetEncoder) {
+	b.pool.Put(encoder)
+}
+
+type blockDecoderPool struct {
+	pool *sync.Pool
+	size int
+}
+
+func NewBlockDecoderPool(size int) TSetDecoderPool {
+	return &blockDecoderPool{
+		pool: &decoderPool,
+		size: size,
+	}
+}
+
+func (b *blockDecoderPool) Get(_ []byte) TSetDecoder {
+	decoder := b.pool.Get().(*blockDecoder)
+	decoder.valueSize = b.size
+	return decoder
+}
+
+func (b *blockDecoderPool) Put(decoder TSetDecoder) {
+	b.pool.Put(decoder)
+}
+
+//blockEncoder backport to reduced value
+type blockEncoder struct {
 	tsBuff    bytes.Buffer
 	valBuff   bytes.Buffer
 	scratch   [binary.MaxVarintLen64]byte
@@ -24,13 +86,7 @@ type BlockEncoder struct {
 	valueSize int
 }
 
-func NewBlockEncoder(size int) TSetEncoder {
-	return &BlockEncoder{
-		valueSize: size,
-	}
-}
-
-func (t *BlockEncoder) Append(ts uint64, value []byte) {
+func (t *blockEncoder) Append(ts uint64, value []byte) {
 	if t.startTime == 0 {
 		t.startTime = ts
 	} else if t.startTime > ts {
@@ -45,18 +101,18 @@ func (t *BlockEncoder) Append(ts uint64, value []byte) {
 	t.num = t.num + 1
 }
 
-func (t *BlockEncoder) IsFull() bool {
+func (t *blockEncoder) IsFull() bool {
 	return t.valBuff.Len() >= t.valueSize
 }
 
-func (t *BlockEncoder) Reset(_ []byte) {
+func (t *blockEncoder) Reset(_ []byte) {
 	t.tsBuff.Reset()
 	t.valBuff.Reset()
 	t.num = 0
 	t.startTime = 0
 }
 
-func (t *BlockEncoder) Encode() ([]byte, error) {
+func (t *blockEncoder) Encode() ([]byte, error) {
 	if t.tsBuff.Len() < 1 {
 		return nil, ErrEncodeEmpty
 	}
@@ -80,21 +136,21 @@ func (t *BlockEncoder) Encode() ([]byte, error) {
 	return result, nil
 }
 
-func (t *BlockEncoder) StartTime() uint64 {
+func (t *blockEncoder) StartTime() uint64 {
 	return t.startTime
 }
 
-func (t *BlockEncoder) putUint16(v uint16) []byte {
+func (t *blockEncoder) putUint16(v uint16) []byte {
 	binary.LittleEndian.PutUint16(t.scratch[:], v)
 	return t.scratch[:2]
 }
 
-func (t *BlockEncoder) putUint32(v uint32) []byte {
+func (t *blockEncoder) putUint32(v uint32) []byte {
 	binary.LittleEndian.PutUint32(t.scratch[:], v)
 	return t.scratch[:4]
 }
 
-func (t *BlockEncoder) putUint64(v uint64) []byte {
+func (t *blockEncoder) putUint64(v uint64) []byte {
 	binary.LittleEndian.PutUint64(t.scratch[:], v)
 	return t.scratch[:8]
 }
@@ -106,8 +162,8 @@ const (
 
 var ErrInvalidValue = errors.New("invalid encoded value")
 
-//BlockDecoder decodes encoded time index
-type BlockDecoder struct {
+//blockDecoder decodes encoded time index
+type blockDecoder struct {
 	ts        []byte
 	val       []byte
 	len       uint32
@@ -115,17 +171,11 @@ type BlockDecoder struct {
 	valueSize int
 }
 
-func NewBlockDecoder(size int) TSetDecoder {
-	return &BlockDecoder{
-		valueSize: size,
-	}
-}
-
-func (t *BlockDecoder) Len() int {
+func (t *blockDecoder) Len() int {
 	return int(t.num)
 }
 
-func (t *BlockDecoder) Decode(_, rawData []byte) (err error) {
+func (t *blockDecoder) Decode(_, rawData []byte) (err error) {
 	var data []byte
 	size := binary.LittleEndian.Uint16(rawData[len(rawData)-2:])
 	if data, err = y.ZSTDDecompress(make([]byte, 0, size), rawData[:len(rawData)-2]); err != nil {
@@ -147,11 +197,11 @@ func (t *BlockDecoder) Decode(_, rawData []byte) (err error) {
 	return nil
 }
 
-func (t *BlockDecoder) IsFull() bool {
+func (t *blockDecoder) IsFull() bool {
 	return int(t.len) >= t.valueSize
 }
 
-func (t *BlockDecoder) Get(ts uint64) ([]byte, error) {
+func (t *blockDecoder) Get(ts uint64) ([]byte, error) {
 	i := sort.Search(int(t.num), func(i int) bool {
 		slot := getTSSlot(t.ts, i)
 		return parseTS(slot) <= ts
@@ -166,7 +216,7 @@ func (t *BlockDecoder) Get(ts uint64) ([]byte, error) {
 	return getVal(t.val, parseOffset(slot))
 }
 
-func (t *BlockDecoder) Iterator() TSetIterator {
+func (t *blockDecoder) Iterator() TSetIterator {
 	return newBlockItemIterator(t)
 }
 
@@ -199,7 +249,7 @@ type blockItemIterator struct {
 	num   int
 }
 
-func newBlockItemIterator(decoder *BlockDecoder) TSetIterator {
+func newBlockItemIterator(decoder *blockDecoder) TSetIterator {
 	return &blockItemIterator{
 		idx:   -1,
 		index: decoder.ts,

@@ -10,17 +10,13 @@ import (
 	"github.com/dgraph-io/badger/v3/bydb"
 )
 
-var encoderFactory = func() bydb.TSetEncoder {
-	return bydb.NewBlockEncoder(math.MaxInt64)
-}
+var encoderPool = bydb.NewBlockEncoderPool(math.MaxInt64)
 
 func TestCompactionMergeAllVersions(t *testing.T) {
 	// Disable compactions and keep all versions of the each key.
 	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(math.MaxInt32).WithExternalCompactor(
-		encoderFactory,
-		func() bydb.TSetDecoder {
-			return bydb.NewBlockDecoder(math.MaxInt64)
-		},
+		encoderPool,
+		bydb.NewBlockDecoderPool(math.MaxInt64),
 	)
 	opt.managedTxns = true
 	t.Run("with overlap", func(t *testing.T) {
@@ -101,7 +97,8 @@ func TestCompactionMergeAllVersions(t *testing.T) {
 }
 
 func encodeValue(values ...string) string {
-	encoder := encoderFactory()
+	encoder := encoderPool.Get(nil)
+	defer encoderPool.Put(encoder)
 	for _, each := range values {
 		v, err := strconv.Atoi(each[len(each)-1:])
 		if err != nil {

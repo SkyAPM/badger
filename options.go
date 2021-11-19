@@ -133,9 +133,9 @@ type Options struct {
 	maxValueThreshold float64
 
 	// Merge compaction
-	FlushCallBack  func()
-	EncoderFactory bydb.TSetEncoderFactory
-	DecoderFactory bydb.TSetDecoderFactory
+	FlushCallBack func()
+	EncoderPool   bydb.TSetEncoderPool
+	DecoderPool   bydb.TSetDecoderPool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -825,8 +825,8 @@ func (opt Options) getFileFlags() int {
 }
 
 // WithExternalCompactor returns a new Options value with external TSetEncoder and TSetDecoder
-func (opt Options) WithExternalCompactor(encoder bydb.TSetEncoderFactory, decoder bydb.TSetDecoderFactory) Options {
-	opt.EncoderFactory = encoder
-	opt.DecoderFactory = decoder
+func (opt Options) WithExternalCompactor(encoderPool bydb.TSetEncoderPool, decoderPool bydb.TSetDecoderPool) Options {
+	opt.EncoderPool = encoderPool
+	opt.DecoderPool = decoderPool
 	return opt
 }

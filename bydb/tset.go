@@ -20,7 +20,10 @@ type TSetEncoder interface {
 	StartTime() uint64
 }
 
-type TSetEncoderFactory func() TSetEncoder
+type TSetEncoderPool interface {
+	Get(metadata []byte) TSetEncoder
+	Put(encoder TSetEncoder)
+}
 
 // TSetDecoder decodes encoded time series data
 type TSetDecoder interface {
@@ -36,7 +39,10 @@ type TSetDecoder interface {
 	Iterator() TSetIterator
 }
 
-type TSetDecoderFactory func() TSetDecoder
+type TSetDecoderPool interface {
+	Get(metadata []byte) TSetDecoder
+	Put(encoder TSetDecoder)
+}
 
 // TSetIterator iterates time series data
 type TSetIterator interface {
