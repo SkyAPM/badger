@@ -69,10 +69,8 @@ type verifyFunc func(t *testing.T, tt test, s *TSet, wantErr bool)
 
 func runTest(t *testing.T, tt test, f verifyFunc) {
 	var dir string
-	encoderPool := bydb.NewBlockEncoderPool(tt.valueSize)
-	decoderPool := bydb.NewBlockDecoderPool(tt.valueSize)
-	runTSetTest(t, "", func(t *testing.T, db *DB) {
-		s := NewTSet(db, WithEncoderPool(encoderPool), WithDecoderPool(decoderPool))
+	runTSetTest(t, "", tt.valueSize, func(t *testing.T, db *DB) {
+		s := NewTSet(db)
 		dir = db.opt.Dir
 
 		for _, arg := range tt.args {
@@ -85,8 +83,8 @@ func runTest(t *testing.T, tt test, f verifyFunc) {
 		}
 	})
 	defer removeDir(dir)
-	runTSetTest(t, dir, func(t *testing.T, db *DB) {
-		f(t, tt, NewTSet(db, WithEncoderPool(encoderPool), WithDecoderPool(decoderPool)), tt.wantVLGetErr)
+	runTSetTest(t, dir, tt.valueSize, func(t *testing.T, db *DB) {
+		f(t, tt, NewTSet(db), tt.wantVLGetErr)
 	})
 }
 
@@ -168,16 +166,19 @@ func verifyGetALL(t *testing.T, tt test, s *TSet, err bool) {
 	}
 }
 
-func runTSetTest(t *testing.T, dir string, test func(t *testing.T, db *DB)) {
+func runTSetTest(t *testing.T, dir string, valueSize int, test func(t *testing.T, db *DB)) {
 	if dir == "" {
 		d, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		dir = d
 	}
-	opts := new(Options)
-	*opts = getTestOptions(dir)
+	opts := getTestOptions(dir)
+	opts = opts.WithExternalCompactor(
+		bydb.NewBlockEncoderPool(valueSize),
+		bydb.NewBlockDecoderPool(valueSize),
+	)
 
-	db, err := Open(*opts)
+	db, err := Open(opts)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())

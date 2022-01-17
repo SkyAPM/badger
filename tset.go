@@ -25,30 +25,13 @@ type TSet struct {
 	decoderPool bydb.TSetDecoderPool
 }
 
-type TSetOptions func(tSet *TSet)
-
-func WithEncoderPool(encoderPool bydb.TSetEncoderPool) TSetOptions {
-	return func(tSet *TSet) {
-		tSet.encoderPool = encoderPool
-	}
-}
-
-func WithDecoderPool(decoderPool bydb.TSetDecoderPool) TSetOptions {
-	return func(tSet *TSet) {
-		tSet.decoderPool = decoderPool
-	}
-}
-
-func NewTSet(db *DB, opts ...TSetOptions) *TSet {
+func NewTSet(db *DB) *TSet {
 	db.opt.NumVersionsToKeep = math.MaxInt64
 	tSet := &TSet{
 		db: db,
 	}
-	for _, option := range opts {
-		option(tSet)
-	}
-	db.encoderPool = tSet.encoderPool
-	db.decoderPool = tSet.decoderPool
+	tSet.encoderPool = db.encoderPool
+	tSet.decoderPool = db.decoderPool
 	return tSet
 }
 
