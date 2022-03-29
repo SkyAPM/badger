@@ -28,6 +28,46 @@ type test struct {
 	wantVLGetErr bool
 }
 
+func TestTSetReplace(t *testing.T) {
+	var dir string
+	putData := func(s *TSet, val []byte) {
+		var err error
+		if err = s.Put([]byte("k1"), val, 1); err != nil {
+			t.Errorf("Put() error = %v", err)
+		}
+		var gotVal []byte
+		if gotVal, err = s.Get([]byte("k1"), 1); err != nil {
+			t.Errorf("Put() error = %v", err)
+		}
+		assert.Equal(t, val, gotVal)
+	}
+	runTSetTest(t, "", 10, func(t *testing.T, db *DB) {
+		s := NewTSet(db)
+		dir = db.opt.Dir
+		putData(s, []byte{1})
+		putData(s, []byte{2})
+	})
+	defer removeDir(dir)
+	runTSetTest(t, dir, 10, func(t *testing.T, db *DB) {
+		s := NewTSet(db)
+		var gotVal []byte
+		var err error
+		if gotVal, err = s.Get([]byte("k1"), 1); err != nil {
+			t.Errorf("Put() error = %v", err)
+		}
+		assert.Equal(t, []byte{2}, gotVal)
+		putData(s, []byte{3})
+	})
+	runTSetTest(t, dir, 10, func(t *testing.T, db *DB) {
+		s := NewTSet(db)
+		var gotVal []byte
+		var err error
+		if gotVal, err = s.Get([]byte("k1"), 1); err != nil {
+			t.Errorf("Put() error = %v", err)
+		}
+		assert.Equal(t, []byte{3}, gotVal)
+	})
+}
 func TestTSetGet(t *testing.T) {
 	inputData := []arg{
 		{[]byte("k1"), 1, []byte{1}},

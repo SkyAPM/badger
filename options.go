@@ -136,6 +136,8 @@ type Options struct {
 	FlushCallBack func()
 	EncoderPool   bydb.TSetEncoderPool
 	DecoderPool   bydb.TSetDecoderPool
+
+	Labels map[string]string
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

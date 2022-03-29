@@ -35,6 +35,8 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
@@ -137,6 +139,9 @@ type DB struct {
 
 	// Merge compaction
 	flushCallback func()
+
+	// Metrics
+	mtBytes prometheus.GaugeVec
 }
 
 const (
@@ -251,6 +256,7 @@ func Open(opt Options) (*DB, error) {
 		}
 	}()
 
+	reg := prometheus.NewRegistry()
 	db := &DB{
 		imm:              make([]*memTable, 0, opt.NumMemtables),
 		flushChan:        make(chan flushTask, opt.NumMemtables),
@@ -268,6 +274,14 @@ func Open(opt Options) (*DB, error) {
 		flushCallback:    opt.FlushCallBack,
 		encoderPool:      opt.EncoderPool,
 		decoderPool:      opt.DecoderPool,
+		mtBytes: *promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name:        "badger_memtables_bytes",
+				Help:        "The bytes of memory tables",
+				ConstLabels: opt.Labels,
+			},
+			[]string{"fid", "component"},
+		),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
