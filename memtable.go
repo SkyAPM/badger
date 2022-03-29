@@ -117,7 +117,7 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		sl:      s,
 		opt:     db.opt,
 		buf:     &bytes.Buffer{},
-		slBytes: db.mtBytes.WithLabelValues(strconv.Itoa(fid), "sl"),
+		slBytes: db.opt.MTBytes.WithLabelValues(strconv.Itoa(fid), "sl"),
 	}
 	// We don't need to create the wal for the skiplist in in-memory mode so return the mt.
 	if db.opt.InMemory {
@@ -131,7 +131,7 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		writeAt:  vlogHeaderSize,
 		opt:      db.opt,
 	}
-	mt.walBytes = db.mtBytes.WithLabelValues(strconv.Itoa(fid), "wal")
+	mt.walBytes = db.opt.MTBytes.WithLabelValues(strconv.Itoa(fid), "wal")
 	lerr := mt.wal.open(filepath, flags, 2*db.opt.MemTableSize)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
@@ -149,6 +149,8 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		return mt, lerr
 	}
 	err := mt.UpdateSkipList()
+	mt.slBytes.Set(float64(mt.sl.MemSize()))
+	mt.walBytes.Set(float64(mt.wal.size))
 	return mt, y.Wrapf(err, "while updating skiplist")
 }
 

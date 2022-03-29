@@ -26,6 +26,7 @@ import (
 
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
@@ -137,8 +138,13 @@ type Options struct {
 	EncoderPool   bydb.TSetEncoderPool
 	DecoderPool   bydb.TSetDecoderPool
 
-	Labels map[string]string
+	// Metrics
+	MTBytes *prometheus.GaugeVec
 }
+
+var (
+	MetricsLabelsMTBytes = []string{"fid", "component"}
+)
 
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
