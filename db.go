@@ -35,7 +35,6 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
@@ -191,9 +190,6 @@ func checkAndSetOptions(opt *Options) error {
 	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
 	if needCache && opt.BlockCacheSize == 0 {
 		panic("BlockCacheSize should be set since compression/encryption are enabled")
-	}
-	if opt.MTBytes == nil {
-		opt.MTBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{}, MetricsLabelsMTBytes)
 	}
 	return nil
 }

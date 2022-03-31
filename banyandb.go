@@ -124,3 +124,16 @@ func (db *DB) write(key, val []byte) (*request, error) {
 	}
 	return req, nil
 }
+
+type Statistics struct {
+	MemBytes int64
+}
+
+func (db *DB) Stats() (s Statistics) {
+	// Stats Memtable size
+	s.MemBytes = db.mt.sl.MemSize()
+	for _, mt := range db.imm {
+		s.MemBytes += mt.sl.MemSize()
+	}
+	return s
+}

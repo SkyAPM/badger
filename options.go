@@ -26,7 +26,6 @@ import (
 
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/dgraph-io/badger/v3/bydb"
 	"github.com/dgraph-io/badger/v3/options"
@@ -137,9 +136,6 @@ type Options struct {
 	FlushCallBack func()
 	EncoderPool   bydb.TSetEncoderPool
 	DecoderPool   bydb.TSetDecoderPool
-
-	// Metrics
-	MTBytes *prometheus.GaugeVec
 }
 
 var (

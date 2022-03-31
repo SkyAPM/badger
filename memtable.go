@@ -39,7 +39,6 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // memTable structure stores a skiplist and a corresponding WAL. Writes to memTable are written
@@ -52,8 +51,6 @@ type memTable struct {
 	maxVersion uint64
 	opt        Options
 	buf        *bytes.Buffer
-	slBytes    prometheus.Gauge
-	walBytes   prometheus.Gauge
 }
 
 func (db *DB) openMemTables(opt Options) error {
@@ -114,10 +111,9 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
-		sl:      s,
-		opt:     db.opt,
-		buf:     &bytes.Buffer{},
-		slBytes: db.opt.MTBytes.WithLabelValues(strconv.Itoa(fid), "sl"),
+		sl:  s,
+		opt: db.opt,
+		buf: &bytes.Buffer{},
 	}
 	// We don't need to create the wal for the skiplist in in-memory mode so return the mt.
 	if db.opt.InMemory {
@@ -131,7 +127,6 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		writeAt:  vlogHeaderSize,
 		opt:      db.opt,
 	}
-	mt.walBytes = db.opt.MTBytes.WithLabelValues(strconv.Itoa(fid), "wal")
 	lerr := mt.wal.open(filepath, flags, 2*db.opt.MemTableSize)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
@@ -149,8 +144,6 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		return mt, lerr
 	}
 	err := mt.UpdateSkipList()
-	mt.slBytes.Set(float64(mt.sl.MemSize()))
-	mt.walBytes.Set(float64(mt.wal.size))
 	return mt, y.Wrapf(err, "while updating skiplist")
 }
 
@@ -205,7 +198,6 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
 			return y.Wrapf(err, "cannot write entry to WAL file")
 		}
-		mt.walBytes.Set(float64(mt.wal.size))
 	}
 	// We insert the finish marker in the WAL but not in the memtable.
 	if entry.meta&bitFinTxn > 0 {
@@ -217,7 +209,6 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
 		mt.maxVersion = ts
 	}
-	mt.slBytes.Set(float64(mt.sl.MemSize()))
 	return nil
 }
 
