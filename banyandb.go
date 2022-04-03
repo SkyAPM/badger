@@ -130,9 +130,10 @@ type Statistics struct {
 }
 
 func (db *DB) Stats() (s Statistics) {
-	// Stats Memtable size
-	s.MemBytes = db.mt.sl.MemSize()
-	for _, mt := range db.imm {
+	tt, relFn := db.getMemTables()
+	defer relFn()
+	for _, mt := range tt {
+		// Stats Memtable size
 		s.MemBytes += mt.sl.MemSize()
 	}
 	return s
