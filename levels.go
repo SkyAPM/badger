@@ -730,13 +730,13 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			vs.Meta = vs.Meta &^ bydb.BitCompact
 			return false
 		}
-		if externalEncoder == nil {
-			externalEncoder = s.kv.encoderPool.Get(currKey)
-			externalEncoder.Reset(currKey)
-		}
 		// Start from the latest version
 		iter := decoder.Iterator()
 		for iter.Next() {
+			if externalEncoder == nil {
+				externalEncoder = s.kv.encoderPool.Get(currKey)
+				externalEncoder.Reset(currKey)
+			}
 			externalEncoder.Append(iter.Time(), iter.Val())
 			if externalEncoder.IsFull() {
 				encode(currKey, builder)
