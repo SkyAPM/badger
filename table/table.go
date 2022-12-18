@@ -35,6 +35,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v3/banyandb"
 	"github.com/dgraph-io/badger/v3/fb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
@@ -83,6 +84,12 @@ type Options struct {
 
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
+
+	// EncoderPool returns a block encoder.
+	EncoderPool banyandb.SeriesEncoderPool
+	// DecoderPool returns a block decoder.
+	DecoderPool    banyandb.SeriesDecoderPool
+	SameKeyInBlock bool
 }
 
 // TableInterface is useful for testing.
@@ -641,6 +648,32 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			return nil, err
 		}
 	}
+	// Decode the block
+	if t.opt.DecoderPool != nil {
+		rawKey := y.ParseKey(ko.KeyBytes())
+		if decoder := t.opt.DecoderPool.Get(rawKey); decoder != nil {
+			defer t.opt.DecoderPool.Put(decoder)
+			data := blk.data[:blk.entriesIndexStart]
+			if err = decoder.Decode(rawKey, data); err != nil {
+				return nil, err
+			}
+			iter := decoder.Iterator()
+			builder := NewTableBuilder(Options{
+				BlockSize: 4 * 1024,
+			})
+			defer builder.Done()
+			for iter.Next() {
+				k := y.KeyWithTs(rawKey, iter.Time())
+				builder.addHelper(k, y.ValueStruct{Value: iter.Val()}, 0)
+			}
+			currBlock := builder.curBlock
+			dst := z.Calloc(currBlock.end+1, "Table.Decrypt")
+			copy(dst, currBlock.data[:currBlock.end])
+			blk.data = dst
+			blk.entriesIndexStart = currBlock.end
+			blk.entryOffsets = currBlock.entryOffsets
+		}
+	}
 
 	blk.incrRef()
 	if useCache && t.opt.BlockCache != nil {
@@ -825,6 +858,9 @@ func NewFilename(id uint64, dir string) string {
 
 // decompress decompresses the data stored in a block.
 func (t *Table) decompress(b *block) error {
+	if t.opt.DecoderPool != nil {
+		return nil
+	}
 	var dst []byte
 	var err error
 

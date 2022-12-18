@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v3/banyandb"
 	"github.com/dgraph-io/badger/v3/fb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
@@ -34,7 +35,8 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keysCount := 100000
+	keysCount := 1000
+	maxVersion := 199 * time.Second
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
@@ -91,6 +93,38 @@ func TestTableIndex(t *testing.T) {
 				IndexCache:           cache,
 			},
 		},
+		{
+			name: "Encoding & Compression",
+			opts: Options{
+				BlockSize:            4 * 1024,
+				BloomFalsePositive:   0.01,
+				TableSize:            30 << 20,
+				Compression:          options.ZSTD,
+				ZSTDCompressionLevel: 3,
+				SameKeyInBlock:       true,
+				EncoderPool: banyandb.NewParityEncoderPool("test", 10, func(key []byte) time.Duration {
+					return time.Second
+				}),
+				DecoderPool: banyandb.NewParityDecoderPool("test", 10, func(key []byte) time.Duration {
+					return time.Second
+				}),
+			},
+		},
+		{
+			name: "Encoding",
+			opts: Options{
+				BlockSize:          4 * 1024,
+				BloomFalsePositive: 0.01,
+				TableSize:          30 << 20,
+				SameKeyInBlock:     true,
+				EncoderPool: banyandb.NewParityEncoderPool("test", 10, func(key []byte) time.Duration {
+					return time.Second
+				}),
+				DecoderPool: banyandb.NewParityDecoderPool("test", 10, func(key []byte) time.Duration {
+					return time.Second
+				}),
+			},
+		},
 	}
 
 	for _, tt := range subTest {
@@ -103,17 +137,19 @@ func TestTableIndex(t *testing.T) {
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := y.KeyWithTs([]byte(fmt.Sprintf("%016x", i)), uint64(i+1))
-				v := fmt.Sprintf("%d", i)
-				vs := y.ValueStruct{Value: []byte(v)}
-				if i == 0 { // This is first key for first block.
-					blockFirstKeys = append(blockFirstKeys, k)
-					blockCount = 1
-				} else if builder.shouldFinishBlock(k, vs) {
-					blockCount++
-					blockFirstKeys = append(blockFirstKeys, k)
+				for j := maxVersion; j >= time.Duration(0); j = j - time.Second {
+					k := y.KeyWithTs([]byte(fmt.Sprintf("%016x", i)), uint64(j))
+					vs := y.ValueStruct{Value: y.U64ToBytes(uint64(i))}
+					if i == 0 && j == maxVersion { // This is first key for first block.
+						blockFirstKeys = append(blockFirstKeys, k)
+						blockCount = 1
+					} else if builder.shouldFinishBlock(k, vs) {
+						blockCount++
+						blockFirstKeys = append(blockFirstKeys, k)
+					}
+					builder.Add(k, vs, 0)
 				}
-				builder.Add(k, vs, 0)
+
 			}
 			tbl, err := CreateTable(filename, builder)
 			require.NoError(t, err, "unable to open table")
@@ -132,7 +168,7 @@ func TestTableIndex(t *testing.T) {
 				require.True(t, idx.Offsets(&bo, i))
 				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
-			require.Equal(t, keysCount, int(tbl.MaxVersion()))
+			require.Equal(t, int(maxVersion), int(tbl.MaxVersion()))
 			tbl.Close(-1)
 			require.NoError(t, os.RemoveAll(filename))
 		})

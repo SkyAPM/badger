@@ -27,6 +27,7 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v3/banyandb"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
@@ -130,6 +131,10 @@ type Options struct {
 	maxBatchSize  int64 // max batch size in bytes
 
 	maxValueThreshold float64
+
+	SameKeyInBlock bool
+	EncoderPool    banyandb.SeriesEncoderPool
+	DecoderPool    banyandb.SeriesDecoderPool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -211,6 +216,9 @@ func buildTableOptions(db *DB) table.Options {
 		IndexCache:           db.indexCache,
 		AllocPool:            db.allocPool,
 		DataKey:              dk,
+		EncoderPool:          opt.EncoderPool,
+		DecoderPool:          opt.DecoderPool,
+		SameKeyInBlock:       opt.SameKeyInBlock,
 	}
 }
 
@@ -816,4 +824,20 @@ func (opt Options) getFileFlags() int {
 		flags |= os.O_RDWR
 	}
 	return flags
+}
+
+// WithKeyBasedEncoder returns a new Options value with external SeriesEncoderPool and SeriesDecoderPool
+func (opt Options) WithKeyBasedEncoder(
+	encoderPool banyandb.SeriesEncoderPool,
+	decoderPool banyandb.SeriesDecoderPool) Options {
+	opt.EncoderPool = encoderPool
+	opt.DecoderPool = decoderPool
+	opt.SameKeyInBlock = true
+	return opt
+}
+
+// WithSameKeyBlock a new Options value with SameKeyInBlock sets to true.
+func (opt Options) WithSameKeyBlock() Options {
+	opt.SameKeyInBlock = true
+	return opt
 }

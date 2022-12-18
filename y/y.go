@@ -597,3 +597,33 @@ func (rm *RateMonitor) Rate() uint64 {
 	}
 	return uint64(total / den)
 }
+
+// I64ToBytes converts int64 to bytes.
+func I64ToBytes(i int64) []byte {
+	abs := i
+	if i < 0 {
+		abs = -abs
+	}
+	u := uint64(abs)
+	if i >= 0 {
+		u |= 1 << 63
+	} else {
+		u = 1<<63 - u
+	}
+	return U64ToBytes(u)
+}
+
+// BytesToI64 converts bytes to int64.
+func BytesToI64(b []byte) int64 {
+	u := binary.BigEndian.Uint64(b)
+	if b[0] >= 128 {
+		u ^= 1 << 63
+	} else {
+		u = 1<<63 - u
+	}
+	abs := int64(u)
+	if b[0] < 128 {
+		abs = -abs
+	}
+	return abs
+}

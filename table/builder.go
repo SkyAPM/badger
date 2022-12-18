@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/dgraph-io/badger/v3/banyandb"
 	"github.com/dgraph-io/badger/v3/fb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
@@ -73,6 +74,11 @@ type bblock struct {
 	baseKey      []byte   // Base key for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	end          int      // Points to the end offset of the block.
+
+	// encoder is from banyandb.SeriesEncoderPool.
+	// It might be nil.
+	encoder       banyandb.SeriesEncoder
+	encodingState encodingState
 }
 
 // Builder is used in building a table.
@@ -96,6 +102,14 @@ type Builder struct {
 	blockChan chan *bblock
 	blockList []*bblock
 }
+
+type encodingState int
+
+const (
+	encodingStateUnknown encodingState = iota
+	encodingStateRunning
+	encodingStateUnsupported
+)
 
 func (b *Builder) allocate(need int) []byte {
 	bb := b.curBlock
@@ -121,6 +135,22 @@ func (b *Builder) allocate(need int) []byte {
 func (b *Builder) append(data []byte) {
 	dst := b.allocate(len(data))
 	y.AssertTrue(len(data) == copy(dst, data))
+}
+
+func (b *Builder) Write(data []byte) (n int, err error) {
+	b.append(data)
+	return len(data), nil
+}
+
+func (b *Builder) WriteByte(data byte) error {
+	dst := b.allocate(1)
+	y.AssertTrue(1 == len(dst))
+	dst[0] = data
+	return nil
+}
+
+func (b *Builder) Bytes() []byte {
+	return b.curBlock.data
 }
 
 const maxAllocatorInitialSz = 256 << 20
@@ -221,8 +251,32 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
-	if version := y.ParseTs(key); version > b.maxVersion {
+	var version uint64
+	if version = y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
+	}
+	encoderFn := func() bool {
+		if b.curBlock.encodingState == encodingStateUnsupported || b.opts.EncoderPool == nil {
+			return false
+		}
+		if b.curBlock.encodingState == encodingStateUnknown {
+			b.curBlock.encoder = b.opts.EncoderPool.Get(key, b)
+			if b.curBlock.encoder == nil {
+				b.curBlock.encodingState = encodingStateUnsupported
+				return false
+			}
+			b.curBlock.encodingState = encodingStateRunning
+		}
+		if len(b.curBlock.baseKey) == 0 {
+			b.curBlock.baseKey = append(b.curBlock.baseKey[:0], key...)
+		}
+		b.curBlock.encoder.Append(version, v.Value)
+		// should restore entry offsets on decoding the block.
+		b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, 0)
+		return true
+	}
+	if encoderFn() {
+		return
 	}
 
 	// diffKey stores the difference of key with baseKey.
@@ -272,6 +326,10 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
+	if b.curBlock.encodingState == encodingStateRunning {
+		b.curBlock.encoder.Encode()
+		b.opts.EncoderPool.Put(b.curBlock.encoder)
+	}
 	if len(b.curBlock.entryOffsets) == 0 {
 		return
 	}
@@ -298,7 +356,7 @@ func (b *Builder) finishBlock() {
 	b.lenOffsets += uint32(int(math.Ceil(float64(len(b.curBlock.baseKey))/4))*4) + 40
 
 	// If compression/encryption is enabled, we need to send the block to the blockChan.
-	if b.blockChan != nil {
+	if b.blockChan != nil && b.opts.EncoderPool == nil {
 		b.blockChan <- b.curBlock
 	}
 }
@@ -307,6 +365,17 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// If there is no entry till now, we will return false.
 	if len(b.curBlock.entryOffsets) <= 0 {
 		return false
+	}
+
+	// If the key is different, finish the current block.
+	if b.opts.SameKeyInBlock {
+		if y.CompareKeys(b.curBlock.baseKey, key) != 0 {
+			return true
+		}
+		// If the encoder is present, builder has to ask the encoder whether it could finish the block.
+		if b.curBlock.encodingState == encodingStateRunning {
+			return b.curBlock.encoder.IsFull()
+		}
 	}
 
 	// Integer overflow check for statements below.
