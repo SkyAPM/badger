@@ -694,7 +694,7 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	var tables []*memTable
 
 	// Mutable memtable does not exist in read-only mode.
-	if !db.opt.ReadOnly {
+	if !db.opt.ReadOnly && db.mt != nil {
 		// Get mutable memtable.
 		tables = append(tables, db.mt)
 		db.mt.IncrRef()
