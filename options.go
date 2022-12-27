@@ -132,9 +132,10 @@ type Options struct {
 
 	maxValueThreshold float64
 
-	SameKeyInBlock bool
-	EncoderPool    banyandb.SeriesEncoderPool
-	DecoderPool    banyandb.SeriesDecoderPool
+	SameKeyInBlock    bool
+	EncoderPool       banyandb.SeriesEncoderPool
+	DecoderPool       banyandb.SeriesDecoderPool
+	EncodingBlockSize int
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -219,6 +220,7 @@ func buildTableOptions(db *DB) table.Options {
 		EncoderPool:          opt.EncoderPool,
 		DecoderPool:          opt.DecoderPool,
 		SameKeyInBlock:       opt.SameKeyInBlock,
+		EncodingBlockSize:    opt.EncodingBlockSize,
 	}
 }
 
@@ -829,9 +831,10 @@ func (opt Options) getFileFlags() int {
 // WithKeyBasedEncoder returns a new Options value with external SeriesEncoderPool and SeriesDecoderPool
 func (opt Options) WithKeyBasedEncoder(
 	encoderPool banyandb.SeriesEncoderPool,
-	decoderPool banyandb.SeriesDecoderPool) Options {
+	decoderPool banyandb.SeriesDecoderPool, encodingBlockSize int) Options {
 	opt.EncoderPool = encoderPool
 	opt.DecoderPool = decoderPool
+	opt.EncodingBlockSize = encodingBlockSize
 	opt.SameKeyInBlock = true
 	return opt
 }

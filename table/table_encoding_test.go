@@ -45,6 +45,7 @@ func TestEncodingMergingIterator(t *testing.T) {
 		Compression:          options.ZSTD,
 		ZSTDCompressionLevel: 15,
 		BlockSize:            4 * 1024,
+		EncodingBlockSize:    2 * 1024,
 		BloomFalsePositive:   0.01,
 		SameKeyInBlock:       true,
 		EncoderPool: banyandb.NewIntEncoderPool("test", 2, func(key []byte) time.Duration {
@@ -100,6 +101,7 @@ func TestSameKeyBlock(t *testing.T) {
 				Compression:          options.ZSTD,
 				ZSTDCompressionLevel: 15,
 				BlockSize:            4 * 1024,
+				EncodingBlockSize:    2 * 1024,
 				BloomFalsePositive:   0.01,
 				SameKeyInBlock:       true,
 			}

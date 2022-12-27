@@ -97,6 +97,7 @@ func TestTableIndex(t *testing.T) {
 			name: "Encoding & Compression",
 			opts: Options{
 				BlockSize:            4 * 1024,
+				EncodingBlockSize:    2 * 1024,
 				BloomFalsePositive:   0.01,
 				TableSize:            30 << 20,
 				Compression:          options.ZSTD,
@@ -114,6 +115,7 @@ func TestTableIndex(t *testing.T) {
 			name: "Encoding",
 			opts: Options{
 				BlockSize:          4 * 1024,
+				EncodingBlockSize:  2 * 1024,
 				BloomFalsePositive: 0.01,
 				TableSize:          30 << 20,
 				SameKeyInBlock:     true,

@@ -232,6 +232,7 @@ func runTSetTest(t *testing.T, dir string, valueSize int, test func(t *testing.T
 		banyandb.NewIntDecoderPool("test", valueSize, func(key []byte) time.Duration {
 			return time.Minute
 		}),
+		2*1024,
 	)
 
 	db, err := Open(opts)

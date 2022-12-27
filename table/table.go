@@ -88,8 +88,9 @@ type Options struct {
 	// EncoderPool returns a block encoder.
 	EncoderPool banyandb.SeriesEncoderPool
 	// DecoderPool returns a block decoder.
-	DecoderPool    banyandb.SeriesDecoderPool
-	SameKeyInBlock bool
+	DecoderPool       banyandb.SeriesDecoderPool
+	SameKeyInBlock    bool
+	EncodingBlockSize int
 }
 
 // TableInterface is useful for testing.
@@ -659,17 +660,18 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			}
 			iter := decoder.Iterator()
 			builder := NewTableBuilder(Options{
-				BlockSize: 4 * 1024,
+				BlockSize: t.opt.EncodingBlockSize,
 			})
-			defer builder.Done()
+			defer builder.Close()
 			for iter.Next() {
 				k := y.KeyWithTs(rawKey, iter.Time())
+				if builder.curBlock == nil {
+					builder.newCurBlock(k)
+				}
 				builder.addHelper(k, y.ValueStruct{Value: iter.Val()}, 0)
 			}
 			currBlock := builder.curBlock
-			dst := z.Calloc(currBlock.end+1, "Table.Decrypt")
-			copy(dst, currBlock.data[:currBlock.end])
-			blk.data = dst
+			blk.data = builder.Finish()
 			blk.entriesIndexStart = currBlock.end
 			blk.entryOffsets = currBlock.entryOffsets
 		}
