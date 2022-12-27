@@ -211,6 +211,9 @@ func verifyGet(t *testing.T, tt test, s *TSet, wantErr bool) {
 			t.Errorf("Get() error = %v, wantGetErr %v", err, wantErr)
 			return
 		}
+		if len(gotVal) != 8 {
+			t.Errorf("Get() gotVal = %v, the length does not equal to 8", gotVal)
+		}
 
 		if !wantErr && !reflect.DeepEqual(y.BytesToI64(gotVal), arg.val) {
 			t.Errorf("Get() gotVal = %v, want %v", gotVal, arg.val)

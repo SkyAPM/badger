@@ -662,7 +662,10 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			builder := NewTableBuilder(Options{
 				BlockSize: t.opt.EncodingBlockSize,
 			})
-			defer builder.Close()
+			defer func() {
+				// Don't have to invoke builder.Finish() because there is no any resource to reclaim
+				builder.Close()
+			}()
 			for iter.Next() {
 				k := y.KeyWithTs(rawKey, iter.Time())
 				if builder.curBlock == nil {
@@ -671,8 +674,9 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 				builder.addHelper(k, y.ValueStruct{Value: iter.Val()}, 0)
 			}
 			currBlock := builder.curBlock
-			blk.data = builder.Finish()
-			blk.entriesIndexStart = currBlock.end
+			blk.data = make([]byte, currBlock.end)
+			copy(blk.data, currBlock.data[:currBlock.end])
+			blk.entriesIndexStart = len(blk.data)
 			blk.entryOffsets = currBlock.entryOffsets
 		}
 	}
