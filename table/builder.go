@@ -250,7 +250,8 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
-	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
+	rawKey := y.ParseKey(key)
+	b.keyHashes = append(b.keyHashes, y.Hash(rawKey))
 
 	var version uint64
 	if version = y.ParseTs(key); version > b.maxVersion {
@@ -261,7 +262,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 			return false
 		}
 		if b.curBlock.encodingState == encodingStateUnknown {
-			b.curBlock.encoder = b.opts.EncoderPool.Get(key, b)
+			b.curBlock.encoder = b.opts.EncoderPool.Get(rawKey, b)
 			if b.curBlock.encoder == nil {
 				b.curBlock.encodingState = encodingStateUnsupported
 				return false
