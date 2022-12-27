@@ -361,7 +361,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 
 	// If the key is different, finish the current block.
 	if b.opts.SameKeyInBlock {
-		if y.CompareKeys(b.curBlock.baseKey, key) != 0 {
+		if !y.SameKey(b.curBlock.baseKey, key) {
 			return true
 		}
 		// If the encoder is present, builder has to ask the encoder whether it could finish the block.
