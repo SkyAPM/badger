@@ -73,11 +73,12 @@ func TestTableIndex(t *testing.T) {
 			// Compression mode.
 			name: "Only compression",
 			opts: Options{
-				BlockSize:            4 * 1024,
+				BlockSize:            1024 * 1024,
 				BloomFalsePositive:   0.01,
 				TableSize:            30 << 20,
 				Compression:          options.ZSTD,
 				ZSTDCompressionLevel: 3,
+				SameKeyInBlock:       true,
 			},
 		},
 		{

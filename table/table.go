@@ -668,9 +668,6 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			}()
 			for iter.Next() {
 				k := y.KeyWithTs(rawKey, iter.Time())
-				if builder.curBlock == nil {
-					builder.newCurBlock(k)
-				}
 				builder.addHelper(k, y.ValueStruct{Value: iter.Val()}, 0)
 			}
 			currBlock := builder.curBlock

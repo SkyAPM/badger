@@ -19,7 +19,6 @@ package table
 import (
 	"crypto/aes"
 	"math"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -166,6 +165,9 @@ func NewTableBuilder(opts Options) *Builder {
 		opts:  &opts,
 	}
 	b.alloc.Tag = "Builder"
+	b.curBlock = &bblock{
+		data: b.alloc.Allocate(opts.BlockSize + padding),
+	}
 	b.opts.tableCapacity = uint64(float64(b.opts.TableSize) * 0.95)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
@@ -174,13 +176,15 @@ func NewTableBuilder(opts Options) *Builder {
 		return b
 	}
 
-	count := 2 * runtime.NumCPU()
-	b.blockChan = make(chan *bblock, count*2)
+	// Sync compression
 
-	b.wg.Add(count)
-	for i := 0; i < count; i++ {
-		go b.handleBlock()
-	}
+	// count := 2 * runtime.NumCPU()
+	// b.blockChan = make(chan *bblock, count*2)
+
+	// b.wg.Add(count)
+	// for i := 0; i < count; i++ {
+	// 	go b.handleBlock()
+	// }
 	return b
 }
 
@@ -253,8 +257,16 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 		b.maxVersion = version
 	}
 	encoderFn := func() bool {
-		if b.curBlock.encodingState == encodingStateUnsupported {
+		if b.curBlock.encodingState == encodingStateUnsupported || b.opts.EncoderPool == nil {
 			return false
+		}
+		if b.curBlock.encodingState == encodingStateUnknown {
+			b.curBlock.encoder = b.opts.EncoderPool.Get(key, b)
+			if b.curBlock.encoder == nil {
+				b.curBlock.encodingState = encodingStateUnsupported
+				return false
+			}
+			b.curBlock.encodingState = encodingStateRunning
 		}
 		if len(b.curBlock.baseKey) == 0 {
 			b.curBlock.baseKey = append(b.curBlock.baseKey[:0], key...)
@@ -315,9 +327,6 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	if b.curBlock == nil {
-		b.newCurBlock(nil)
-	}
 	if b.curBlock.encodingState == encodingStateRunning {
 		b.curBlock.encoder.Encode()
 		b.opts.EncoderPool.Put(b.curBlock.encoder)
@@ -348,8 +357,33 @@ func (b *Builder) finishBlock() {
 	b.lenOffsets += uint32(int(math.Ceil(float64(len(b.curBlock.baseKey))/4))*4) + 40
 
 	// If compression/encryption is enabled, we need to send the block to the blockChan.
-	if b.blockChan != nil && b.opts.EncoderPool == nil {
-		b.blockChan <- b.curBlock
+	// if b.blockChan != nil && b.opts.EncoderPool == nil {
+	// 	b.blockChan <- b.curBlock
+	// }
+
+	// Sync encrypt & compression
+	if b.opts.EncoderPool == nil {
+		blockBuf := b.curBlock.data[:b.curBlock.end]
+		if b.opts.Compression != options.None {
+			out, err := b.compressData(blockBuf)
+			y.Check(err)
+			blockBuf = out
+		}
+		if b.shouldEncrypt() {
+			out, err := b.encrypt(blockBuf)
+			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+			blockBuf = out
+		}
+		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
+		// than allocated space that means the data from this block cannot be stored in its
+		// existing location.
+		allocatedSpace := maxEncodedLen(b.opts.Compression, (b.curBlock.end)) + padding + 1
+		y.AssertTrue(len(blockBuf) <= allocatedSpace)
+
+		// blockBuf was allocated on allocator. So, we don't need to copy it over.
+		b.curBlock.data = blockBuf
+		b.curBlock.end = len(blockBuf)
+		atomic.AddUint32(&b.compressedSize, uint32(len(blockBuf)))
 	}
 }
 
@@ -407,41 +441,18 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 }
 
 func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, isStale bool) {
-	if b.curBlock == nil {
-		b.newCurBlock(key)
-	}
 	if b.shouldFinishBlock(key, value) {
 		if isStale {
 			// This key will be added to tableIndex and it is stale.
 			b.staleDataSize += len(key) + 4 /* len */ + 4 /* offset */
 		}
 		b.finishBlock()
-		b.newCurBlock(key)
+		pre := b.curBlock.data
+		b.curBlock = &bblock{
+			data: pre[:0],
+		}
 	}
 	b.addHelper(key, value, valueLen)
-}
-
-func (b *Builder) newCurBlock(key []byte) {
-	if b.opts.EncoderPool == nil || key == nil {
-		b.curBlock = &bblock{
-			data:          b.alloc.Allocate(b.opts.BlockSize),
-			encodingState: encodingStateUnsupported,
-		}
-		return
-	}
-	encoder := b.opts.EncoderPool.Get(y.ParseKey(key), b)
-	if encoder == nil {
-		b.curBlock = &bblock{
-			data:          b.alloc.Allocate(b.opts.BlockSize),
-			encodingState: encodingStateUnsupported,
-		}
-		return
-	}
-	b.curBlock = &bblock{
-		data:          b.alloc.Allocate(b.opts.EncodingBlockSize),
-		encoder:       encoder,
-		encodingState: encodingStateRunning,
-	}
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
@@ -457,12 +468,8 @@ func (b *Builder) ReachedCapacity() bool {
 	if b.opts.Compression == options.None && b.opts.DataKey == nil {
 		sumBlockSizes = b.uncompressedSize
 	}
-	entryOffsetsSize := 0
-	if b.curBlock != nil {
-		entryOffsetsSize = len(b.curBlock.entryOffsets)
-	}
 	blocksSize := sumBlockSizes + // actual length of current buffer
-		uint32(entryOffsetsSize*4) + // all entry offsets size
+		uint32(len(b.curBlock.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
