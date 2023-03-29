@@ -336,7 +336,7 @@ func Open(opt Options) (*DB, error) {
 		return nil, y.Wrapf(err, "while opening memtables")
 	}
 
-	if !db.opt.ReadOnly {
+	if !db.opt.ReadOnly && !db.opt.InTable {
 		if db.mt, err = db.newMemTable(); err != nil {
 			return nil, y.Wrapf(err, "cannot create memtable")
 		}
@@ -432,7 +432,7 @@ func (db *DB) MaxVersion() uint64 {
 	}
 	db.lock.Lock()
 	// In read only mode, we do not create new mem table.
-	if !db.opt.ReadOnly {
+	if !db.opt.ReadOnly && !db.opt.InTable {
 		update(db.mt.maxVersion)
 	}
 	for _, mt := range db.imm {

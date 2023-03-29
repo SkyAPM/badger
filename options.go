@@ -136,6 +136,7 @@ type Options struct {
 	EncoderPool       banyandb.SeriesEncoderPool
 	DecoderPool       banyandb.SeriesDecoderPool
 	EncodingBlockSize int
+	InTable           bool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -842,5 +843,11 @@ func (opt Options) WithKeyBasedEncoder(
 // WithSameKeyBlock a new Options value with SameKeyInBlock sets to true.
 func (opt Options) WithSameKeyBlock() Options {
 	opt.SameKeyInBlock = true
+	return opt
+}
+
+// WithInTable returns a new Options value with InTable sets to true.
+func (opt Options) WithInTable() Options {
+	opt.InTable = true
 	return opt
 }

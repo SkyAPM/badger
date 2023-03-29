@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"math"
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +22,7 @@ func TestWriteViaIterator(t *testing.T) {
 		return []byte(fmt.Sprintf("%128d", i))
 	}
 	opt := DefaultOptions("")
+	opt.InTable = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		s := db.NewSkiplist()
 		for i := 0; i < 100; i++ {
@@ -56,10 +56,15 @@ func TestPutAndGet(t *testing.T) {
 		return []byte(fmt.Sprintf("%128d", i))
 	}
 	opt := DefaultOptions("")
+	opt.InTable = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		s := db.NewSkiplist()
 		for i := 0; i < 100; i++ {
-			require.NoError(t, db.Put(y.KeyWithTs(key(i), 101), val(i)))
+			s.Put(y.KeyWithTs(key(i), 101), y.ValueStruct{Value: val(i)})
 		}
+
+		// Hand over iterator to Badger.
+		require.NoError(t, db.HandoverIterator(s.NewUniIterator(false)))
 
 		// Read the data back.
 		itr := db.NewIterator(DefaultIteratorOptions)
@@ -146,53 +151,37 @@ func runTest(t *testing.T, tt test, f verifyFunc) {
 		s := NewTSet(db)
 		dir = db.opt.Dir
 
+		sl := db.NewSkiplist()
+
+		// Hand over iterator to Badger.
 		for _, arg := range tt.args {
-			if err := s.Put([]byte(arg.key), y.I64ToBytes(arg.val), uint64(arg.ts.UnixNano())); (err != nil) != tt.wantPutErr {
-				t.Errorf("Put() error = %v, wantPutErr %v", err, tt.wantPutErr)
-			}
+			sl.Put(y.KeyWithTs([]byte(arg.key), uint64(arg.ts.UnixNano())), y.ValueStruct{Value: y.I64ToBytes(arg.val)})
 		}
+		require.NoError(t, db.HandoverIterator(sl.NewUniIterator(false)))
 		if !tt.wantVLGetErr {
 			f(t, tt, s, tt.wantMTGetErr)
 		}
 	})
 	defer removeDir(dir)
-	// Verify disk tables
-	runTSetTest(t, dir, tt.valueSize, func(t *testing.T, db *DB) {
-		f(t, tt, NewTSet(db), tt.wantVLGetErr)
-	})
 }
 
 func runTest2(t *testing.T, tt test, f verifyFunc) {
 	var dir string
-	// Verify memory + two L0 tables
+	// three L0 tables
 	runTSetTest(t, "", tt.valueSize, func(t *testing.T, db *DB) {
 		s := NewTSet(db)
 		dir = db.opt.Dir
 
-		var ts int64
+		grouped := make(map[time.Time][]arg)
 		for _, arg := range tt.args {
-			tn := arg.ts.UnixNano()
-			if ts == 0 {
-				ts = tn
-			} else if ts != tn {
-				db.lock.Lock()
-				var wg sync.WaitGroup
-				wg.Add(1)
-				db.flushChan <- flushTask{mt: db.mt, cb: func() {
-					wg.Done()
-				}}
-				// We manage to push this task. Let's modify imm.
-				db.imm = append(db.imm, db.mt)
-				var err error
-				db.mt, err = db.newMemTable()
-				db.lock.Unlock()
-				require.NoError(t, err)
-				wg.Wait()
-				ts = tn
+			grouped[arg.ts] = append(grouped[arg.ts], arg)
+		}
+		for _, v := range grouped {
+			sl := db.NewSkiplist()
+			for _, a := range v {
+				sl.Put(y.KeyWithTs([]byte(a.key), uint64(a.ts.UnixNano())), y.ValueStruct{Value: y.I64ToBytes(a.val)})
 			}
-			if err := s.Put([]byte(arg.key), y.I64ToBytes(arg.val), uint64(tn)); (err != nil) != tt.wantPutErr {
-				t.Errorf("Put() error = %v, wantPutErr %v", err, tt.wantPutErr)
-			}
+			require.NoError(t, db.HandoverIterator(sl.NewUniIterator(false)))
 		}
 		if !tt.wantVLGetErr {
 			f(t, tt, s, tt.wantMTGetErr)
@@ -237,6 +226,7 @@ func runTSetTest(t *testing.T, dir string, valueSize int, test func(t *testing.T
 		}),
 		2*1024,
 	)
+	opts = opts.WithInTable()
 
 	db, err := Open(opts)
 

@@ -154,44 +154,6 @@ func NewTSet(db *DB) *TSet {
 	return tSet
 }
 
-func (s *TSet) Put(key, val []byte, ts uint64) error {
-	req, err := s.write(key, val, ts)
-	if err != nil {
-		return err
-	}
-	return req.Wait()
-}
-
-func (s *TSet) PutAsync(key, val []byte, ts uint64, f func(error)) error {
-	req, err := s.write(key, val, ts)
-	if err != nil {
-		return err
-	}
-	if f == nil {
-		return nil
-	}
-	go func() {
-		err := req.Wait()
-		f(err)
-	}()
-	return nil
-}
-
-func (s *TSet) write(key, val []byte, ts uint64) (*request, error) {
-	if ts < 1 {
-		return nil, ErrTSetInvalidTS
-	}
-	entry := &Entry{
-		Key:   y.KeyWithTs(key, ts),
-		Value: val,
-	}
-	req, err := s.db.sendToWriteCh([]*Entry{entry})
-	if err != nil {
-		return nil, fmt.Errorf("failed to send entry to write channel: %v", err)
-	}
-	return req, nil
-}
-
 func (s *TSet) Get(key []byte, ts uint64) (val []byte, err error) {
 	db := s.db
 	if db.IsClosed() {
