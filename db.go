@@ -128,6 +128,8 @@ type DB struct {
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
+
+	stat Statistics
 }
 
 const (
@@ -1133,6 +1135,8 @@ type flushTask struct {
 func (db *DB) handleFlushTask(ft flushTask) error {
 	// ft.mt could be nil with ft.itr being the valid field.
 	bopts := buildTableOptions(db)
+	bopts = db.compressAndEncodeStat(bopts, -1, 0)
+
 	builder := buildL0Table(ft, bopts)
 	defer builder.Close()
 

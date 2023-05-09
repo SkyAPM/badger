@@ -91,6 +91,17 @@ type Options struct {
 	DecoderPool       banyandb.SeriesDecoderPool
 	SameKeyInBlock    bool
 	EncodingBlockSize int
+	State             *State
+}
+
+type State struct {
+	// Record compression and encoding statistics.
+	UnCompressedSize *atomic.Int64
+	CompressedSize   *atomic.Int64
+	CompressedNum    *atomic.Int64
+	UnEncodedSize    *atomic.Int64
+	EncodedSize      *atomic.Int64
+	EncodedNum       *atomic.Int64
 }
 
 // TableInterface is useful for testing.
@@ -661,6 +672,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			iter := decoder.Iterator()
 			builder := NewTableBuilder(Options{
 				BlockSize: t.opt.EncodingBlockSize,
+				AllocPool: t.opt.AllocPool,
 			})
 			defer func() {
 				// Don't have to invoke builder.Finish() because there is no any resource to reclaim

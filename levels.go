@@ -816,6 +816,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		bopts := buildTableOptions(s.kv)
 		// Set TableSize to the target file size for that level.
 		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
+		bopts = s.kv.compressAndEncodeStat(bopts, cd.thisLevel.level, cd.nextLevel.level)
 		builder := table.NewTableBuilder(bopts)
 
 		// This would do the iteration and add keys to builder.

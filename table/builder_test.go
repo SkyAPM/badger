@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,16 @@ func TestTableIndex(t *testing.T) {
 		MaxCost:     1 << 20,
 		BufferItems: 64,
 	})
+	newState := func() *State {
+		return &State{
+			UnCompressedSize: &atomic.Int64{},
+			CompressedSize:   &atomic.Int64{},
+			CompressedNum:    &atomic.Int64{},
+			UnEncodedSize:    &atomic.Int64{},
+			EncodedSize:      &atomic.Int64{},
+			EncodedNum:       &atomic.Int64{},
+		}
+	}
 	require.NoError(t, err)
 	subTest := []struct {
 		name string
@@ -79,6 +90,7 @@ func TestTableIndex(t *testing.T) {
 				Compression:          options.ZSTD,
 				ZSTDCompressionLevel: 3,
 				SameKeyInBlock:       true,
+				State:                newState(),
 			},
 		},
 		{
@@ -92,6 +104,7 @@ func TestTableIndex(t *testing.T) {
 				ZSTDCompressionLevel: 3,
 				DataKey:              &pb.DataKey{Data: key},
 				IndexCache:           cache,
+				State:                newState(),
 			},
 		},
 		{
@@ -110,6 +123,7 @@ func TestTableIndex(t *testing.T) {
 				DecoderPool: banyandb.NewParityDecoderPool("test", 10, func(key []byte) time.Duration {
 					return time.Second
 				}),
+				State: newState(),
 			},
 		},
 		{
@@ -126,6 +140,7 @@ func TestTableIndex(t *testing.T) {
 				DecoderPool: banyandb.NewParityDecoderPool("test", 10, func(key []byte) time.Duration {
 					return time.Second
 				}),
+				State: newState(),
 			},
 		},
 	}

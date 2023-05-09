@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/pkg/errors"
@@ -127,18 +130,82 @@ func (db *DB) write(key, val []byte) (*request, error) {
 	return req, nil
 }
 
-type Statistics struct {
-	MemBytes int64
+type TableBuilderSizeKeyType int
+
+const (
+	TableBuilderSizeKeyCompressedNum TableBuilderSizeKeyType = iota
+	TableBuilderSizeKeyCompressedSize
+	TableBuilderSizeKeyUncompressedSize
+	TableBuilderSizeKeyEncodedNum
+	TableBuilderSizeKeyEncodedSize
+	TableBuilderSizeKeyUnEncodedSize
+)
+
+type TableBuilderSizeKey struct {
+	Type      TableBuilderSizeKeyType
+	FromLevel int
+	ToLevel   int
 }
 
-func (db *DB) Stats() (s Statistics) {
-	tt, relFn := db.getMemTables()
-	defer relFn()
-	for _, mt := range tt {
-		// Stats Memtable size
-		s.MemBytes += mt.sl.MemSize()
+func (db *DB) compressAndEncodeStat(opts table.Options, from, to int) table.Options {
+	if opts.Compression != options.None {
+		if opts.State == nil {
+			opts.State = &table.State{}
+		}
+		var size interface{}
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyUncompressedSize,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.UnCompressedSize = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyCompressedSize,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.CompressedSize = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyCompressedNum,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.CompressedNum = size.(*atomic.Int64)
 	}
-	return s
+	if opts.EncoderPool != nil {
+		if opts.State == nil {
+			opts.State = &table.State{}
+		}
+		var size interface{}
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyUnEncodedSize,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.UnEncodedSize = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyEncodedSize,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.EncodedSize = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyEncodedNum,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.EncodedNum = size.(*atomic.Int64)
+	}
+	return opts
+
+}
+
+type Statistics struct {
+	TableBuilderSize sync.Map
+}
+
+func (db *DB) CollectStats() (s Statistics) {
+	return db.stat
 }
 
 var ErrTSetInvalidTS = errors.New("Timestamp should be greater than 0")
