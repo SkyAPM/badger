@@ -129,7 +129,7 @@ type DB struct {
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
 
-	stat Statistics
+	stat *Statistics
 }
 
 const (
@@ -258,6 +258,7 @@ func Open(opt Options) (*DB, error) {
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
+		stat:             &Statistics{TableBuilderSize: &sync.Map{}},
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {

@@ -215,10 +215,10 @@ func (db *DB) compressAndEncodeStat(opts table.Options, from, to int) table.Opti
 }
 
 type Statistics struct {
-	TableBuilderSize sync.Map
+	TableBuilderSize *sync.Map
 }
 
-func (db *DB) CollectStats() (s Statistics) {
+func (db *DB) CollectStats() (s *Statistics) {
 	return db.stat
 }
 
