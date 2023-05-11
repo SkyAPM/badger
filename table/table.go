@@ -875,9 +875,6 @@ func NewFilename(id uint64, dir string) string {
 
 // decompress decompresses the data stored in a block.
 func (t *Table) decompress(b *block) error {
-	if t.opt.DecoderPool != nil {
-		return nil
-	}
 	var dst []byte
 	var err error
 

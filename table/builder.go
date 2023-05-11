@@ -276,7 +276,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 			b.curBlock.baseKey = append(b.curBlock.baseKey[:0], key...)
 		}
 		b.curBlock.encoder.Append(version, v.Value)
-		b.curBlock.dataSize += vpLen
+		b.curBlock.dataSize += uint32(8 + len(v.Value))
 		// should restore entry offsets on decoding the block.
 		b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, 0)
 		return true
@@ -339,19 +339,24 @@ func (b *Builder) finishBlock() {
 	if len(b.curBlock.entryOffsets) == 0 {
 		return
 	}
+	if b.curBlock.encodingState == encodingStateRunning && b.state != nil {
+		b.state.EncodedBlockNum.Add(1)
+		b.state.EncodedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
+		b.state.EncodedSize.Add(int64(b.curBlock.end))
+		b.state.UnEncodedSize.Add(int64(b.curBlock.dataSize))
+	}
 	// Append the entryOffsets and its length.
 	b.append(y.U32SliceToBytes(b.curBlock.entryOffsets))
 	b.append(y.U32ToBytes(uint32(len(b.curBlock.entryOffsets))))
 
-	uncompressedSize := b.curBlock.end
-	checksum := b.calculateChecksum(b.curBlock.data[:uncompressedSize])
+	checksum := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
 
 	// Append the block checksum and its length.
 	b.append(checksum)
 	b.append(y.U32ToBytes(uint32(len(checksum))))
 
 	b.blockList = append(b.blockList, b.curBlock)
-	atomic.AddUint32(&b.uncompressedSize, uint32(uncompressedSize))
+	atomic.AddUint32(&b.uncompressedSize, uint32(b.curBlock.end))
 
 	// Add length of baseKey (rounded to next multiple of 4 because of alignment).
 	// Add another 40 Bytes, these additional 40 bytes consists of
@@ -368,42 +373,35 @@ func (b *Builder) finishBlock() {
 	// }
 
 	// Sync encrypt & compression
-	if b.opts.EncoderPool == nil {
-		blockBuf := b.curBlock.data[:b.curBlock.end]
-		if b.opts.Compression != options.None {
-			out, err := b.compressData(blockBuf)
-			y.Check(err)
-			blockBuf = out
-			if b.state != nil {
-				b.state.CompressedBlockNum.Add(1)
-				b.state.CompressedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
-				b.state.CompressedSize.Add(int64(len(out)))
-				b.state.UnCompressedSize.Add(int64(uncompressedSize))
-			}
+	blockBuf := b.curBlock.data[:b.curBlock.end]
+	if b.opts.Compression != options.None {
+		uncompressedSize := len(blockBuf)
+		out, err := b.compressData(blockBuf)
+		y.Check(err)
+		blockBuf = out
+		if b.curBlock.encodingState != encodingStateRunning && b.state != nil {
+			b.state.CompressedBlockNum.Add(1)
+			b.state.CompressedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
+			b.state.CompressedSize.Add(int64(len(out)))
+			b.state.UnCompressedSize.Add(int64(uncompressedSize))
 		}
-		if b.shouldEncrypt() {
-			out, err := b.encrypt(blockBuf)
-			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-			blockBuf = out
-		}
-		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
-		// than allocated space that means the data from this block cannot be stored in its
-		// existing location.
-		allocatedSpace := maxEncodedLen(b.opts.Compression, (b.curBlock.end)) + padding + 1
-		y.AssertTrue(len(blockBuf) <= allocatedSpace)
-
-		// blockBuf was allocated on allocator. So, we don't need to copy it over.
-		b.curBlock.data = blockBuf
-		compressedSize := len(blockBuf)
-		b.curBlock.end = compressedSize
-		atomic.AddUint32(&b.compressedSize, uint32(compressedSize))
-	} else if b.state != nil {
-		b.state.EncodedBlockNum.Add(1)
-		b.state.EncodedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
-		b.state.EncodedSize.Add(int64(uncompressedSize))
-		b.state.UnEncodedSize.Add(int64(b.curBlock.dataSize))
-		b.onDiskSize += uint32(uncompressedSize)
 	}
+	if b.shouldEncrypt() {
+		out, err := b.encrypt(blockBuf)
+		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		blockBuf = out
+	}
+	// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
+	// than allocated space that means the data from this block cannot be stored in its
+	// existing location.
+	allocatedSpace := maxEncodedLen(b.opts.Compression, (b.curBlock.end)) + padding + 1
+	y.AssertTrue(len(blockBuf) <= allocatedSpace)
+
+	// blockBuf was allocated on allocator. So, we don't need to copy it over.
+	b.curBlock.data = blockBuf
+	compressedSize := len(blockBuf)
+	b.curBlock.end = compressedSize
+	atomic.AddUint32(&b.compressedSize, uint32(compressedSize))
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {

@@ -54,8 +54,7 @@ func NewParityEncoderPool(name string, size int, intervalFn ParseInterval) Serie
 
 // If the key is an even, returns a encoder. Otherwise, returns nil.
 func (p *encoderPool) Get(metadata []byte, buffer Buffer) SeriesEncoder {
-	key := y.ParseKey(metadata)
-	intKey, err := strconv.ParseInt(string(key), 16, 64)
+	intKey, err := strconv.ParseInt(string(metadata), 16, 64)
 	if err != nil {
 		panic(err)
 	}
