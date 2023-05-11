@@ -96,12 +96,14 @@ type Options struct {
 
 type State struct {
 	// Record compression and encoding statistics.
-	UnCompressedSize *atomic.Int64
-	CompressedSize   *atomic.Int64
-	CompressedNum    *atomic.Int64
-	UnEncodedSize    *atomic.Int64
-	EncodedSize      *atomic.Int64
-	EncodedNum       *atomic.Int64
+	UnCompressedSize   *atomic.Int64
+	CompressedSize     *atomic.Int64
+	CompressedBlockNum *atomic.Int64
+	CompressedEntryNum *atomic.Int64
+	UnEncodedSize      *atomic.Int64
+	EncodedSize        *atomic.Int64
+	EncodedBlockNum    *atomic.Int64
+	EncodedEntryNum    *atomic.Int64
 }
 
 // TableInterface is useful for testing.

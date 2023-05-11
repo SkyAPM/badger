@@ -73,6 +73,7 @@ type bblock struct {
 	baseKey      []byte   // Base key for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	end          int      // Points to the end offset of the block.
+	dataSize     uint32
 
 	// encoder is from banyandb.SeriesEncoderPool.
 	// It might be nil.
@@ -275,9 +276,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 			b.curBlock.baseKey = append(b.curBlock.baseKey[:0], key...)
 		}
 		b.curBlock.encoder.Append(version, v.Value)
-		if b.state != nil {
-			b.state.UnEncodedSize.Add(int64(len(v.Value) + 8))
-		}
+		b.curBlock.dataSize += vpLen
 		// should restore entry offsets on decoding the block.
 		b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, 0)
 		return true
@@ -376,7 +375,8 @@ func (b *Builder) finishBlock() {
 			y.Check(err)
 			blockBuf = out
 			if b.state != nil {
-				b.state.CompressedNum.Add(1)
+				b.state.CompressedBlockNum.Add(1)
+				b.state.CompressedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
 				b.state.CompressedSize.Add(int64(len(out)))
 				b.state.UnCompressedSize.Add(int64(uncompressedSize))
 			}
@@ -398,8 +398,11 @@ func (b *Builder) finishBlock() {
 		b.curBlock.end = compressedSize
 		atomic.AddUint32(&b.compressedSize, uint32(compressedSize))
 	} else if b.state != nil {
-		b.state.EncodedNum.Add(1)
+		b.state.EncodedBlockNum.Add(1)
+		b.state.EncodedEntryNum.Add(int64(len(b.curBlock.entryOffsets)))
 		b.state.EncodedSize.Add(int64(uncompressedSize))
+		b.state.UnEncodedSize.Add(int64(b.curBlock.dataSize))
+		b.onDiskSize += uint32(uncompressedSize)
 	}
 }
 

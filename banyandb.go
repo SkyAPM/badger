@@ -133,10 +133,12 @@ func (db *DB) write(key, val []byte) (*request, error) {
 type TableBuilderSizeKeyType int
 
 const (
-	TableBuilderSizeKeyCompressedNum TableBuilderSizeKeyType = iota
+	TableBuilderSizeKeyCompressedBlockNum TableBuilderSizeKeyType = iota
+	TableBuilderSizeKeyCompressedEntryNum
 	TableBuilderSizeKeyCompressedSize
 	TableBuilderSizeKeyUncompressedSize
-	TableBuilderSizeKeyEncodedNum
+	TableBuilderSizeKeyEncodedBlockNum
+	TableBuilderSizeKeyEncodedEntryNum
 	TableBuilderSizeKeyEncodedSize
 	TableBuilderSizeKeyUnEncodedSize
 )
@@ -166,11 +168,17 @@ func (db *DB) compressAndEncodeStat(opts table.Options, from, to int) table.Opti
 		}, &atomic.Int64{})
 		opts.State.CompressedSize = size.(*atomic.Int64)
 		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
-			Type:      TableBuilderSizeKeyCompressedNum,
+			Type:      TableBuilderSizeKeyCompressedBlockNum,
 			FromLevel: from,
 			ToLevel:   to,
 		}, &atomic.Int64{})
-		opts.State.CompressedNum = size.(*atomic.Int64)
+		opts.State.CompressedBlockNum = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyCompressedEntryNum,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.CompressedEntryNum = size.(*atomic.Int64)
 	}
 	if opts.EncoderPool != nil {
 		if opts.State == nil {
@@ -190,11 +198,17 @@ func (db *DB) compressAndEncodeStat(opts table.Options, from, to int) table.Opti
 		}, &atomic.Int64{})
 		opts.State.EncodedSize = size.(*atomic.Int64)
 		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
-			Type:      TableBuilderSizeKeyEncodedNum,
+			Type:      TableBuilderSizeKeyEncodedBlockNum,
 			FromLevel: from,
 			ToLevel:   to,
 		}, &atomic.Int64{})
-		opts.State.EncodedNum = size.(*atomic.Int64)
+		opts.State.EncodedBlockNum = size.(*atomic.Int64)
+		size, _ = db.stat.TableBuilderSize.LoadOrStore(TableBuilderSizeKey{
+			Type:      TableBuilderSizeKeyEncodedEntryNum,
+			FromLevel: from,
+			ToLevel:   to,
+		}, &atomic.Int64{})
+		opts.State.EncodedEntryNum = size.(*atomic.Int64)
 	}
 	return opts
 
